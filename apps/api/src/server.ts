@@ -58,6 +58,13 @@ if (fs.existsSync(indexFile)) {
 
 serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
   console.log(`[ezfin] api listening on http://${info.address}:${info.port} (data: ${dbPath()})`);
+  console.log(`[ezfin] local AI: ${env.ai.provider} at ${env.ai.url}, model ${env.ai.model}`);
+  if (db.countUsers() === 0)
+    console.log("[ezfin] no account yet: open the app to create the first one");
+  const sched = scheduler.status();
+  console.log(
+    `[ezfin] scheduled sync ${sched.config.enabled ? `at ${sched.config.times.join(", ")} ${sched.timezone}` : "disabled"}; next ${sched.nextRunAt ?? "never"}`,
+  );
   if (
     !env.allowNonLocalBind &&
     env.host !== "127.0.0.1" &&
