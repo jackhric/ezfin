@@ -59,7 +59,7 @@ describe("server administration", () => {
   it("first user is admin and sees server info; members are refused", async () => {
     const { app, headers, json } = await makeApp();
     const info = await (await app.request("/api/server/info", { headers })).json();
-    expect(info).toMatchObject({ version: expect.any(String), users: 1, provider: "mock" });
+    expect(info).toMatchObject({ version: expect.any(String), users: 1 });
 
     const created = await app.request("/api/users", {
       method: "POST",

@@ -11,6 +11,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
+import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
 import { money, moneyExact, monthLabel, signed } from "@/lib/format";
@@ -20,6 +21,26 @@ const chartConfig = {
   income: { label: "Income", color: "var(--chart-2)" },
   spending: { label: "Spending", color: "var(--chart-1)" },
 } satisfies ChartConfig;
+
+function EmptyState() {
+  return (
+    <div className="mx-auto max-w-lg py-16 text-center">
+      <h1 className="font-heading text-2xl font-semibold tracking-tight">Nothing linked yet</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Link your bank through SimpleFIN to import all of your accounts, or load demo data to look
+        around first. Both are managed under Settings, Data source.
+      </p>
+      <div className="mt-6 flex justify-center gap-2">
+        <Link to="/settings/data-source" className={buttonVariants()}>
+          Link an account
+        </Link>
+        <Link to="/settings/data-source?demo=1" className={buttonVariants({ variant: "outline" })}>
+          Load demo data
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export function OverviewPage() {
   const summary = useQuery(() => api.summary(12));
@@ -35,6 +56,7 @@ export function OverviewPage() {
   if (!summary.data) return <LoadingBlock rows={6} />;
 
   const s = summary.data;
+  if (accounts.data && accounts.data.accounts.length === 0) return <EmptyState />;
   const prev = s.months.length >= 2 ? s.months[s.months.length - 2] : undefined;
   const monthsToShow = s.months.slice(-12);
   const topCats = s.current.byCategory.slice(0, 6);

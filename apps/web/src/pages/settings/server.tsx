@@ -45,13 +45,6 @@ export function ServerSettings() {
             <code className="break-all">{i.database.path}</code> ({mb(i.database.bytes)})
           </div>
         </Field>
-        <Field label="Data provider">
-          <div className="text-sm">
-            {i.provider === "mock"
-              ? "Demo data (EZFIN_PROVIDER=mock)"
-              : "SimpleFIN (EZFIN_PROVIDER=simplefin)"}
-          </div>
-        </Field>
         <Field label="Local AI">
           <div className="text-sm">
             {i.ai.provider} at <code>{i.ai.url}</code>, model <code>{i.ai.model}</code>

@@ -11,6 +11,8 @@ export interface Account {
   availableBalance?: number;
   /** ISO timestamp of the last successful sync. */
   lastSyncedAt: string;
+  /** The data-source link this account was imported through. */
+  linkId?: string;
 }
 
 export interface Transaction {

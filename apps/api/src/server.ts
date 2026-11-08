@@ -5,15 +5,14 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
 import { dbPath, env } from "./env.ts";
-import { MockProvider, SimpleFinProvider, type Provider } from "./providers/index.ts";
+import { MockProvider, SimpleFinProvider } from "./providers/index.ts";
+import { FileSecretStore } from "./secrets.ts";
 import { LocalClassifier } from "./ai/classifier.ts";
 import { AiJob } from "./ai/job.ts";
 
 const db = openDb(dbPath());
-const provider: Provider =
-  env.provider === "simplefin"
-    ? new SimpleFinProvider(env.dataDir, env.simplefinAccessUrl)
-    : new MockProvider();
+const providers = { simplefin: new SimpleFinProvider(), demo: new MockProvider() };
+const secrets = new FileSecretStore(env.dataDir);
 
 // Local AI is always wired up; whether a model server is actually running is reported by /api/ai/status.
 const classifier = new LocalClassifier({
@@ -29,7 +28,7 @@ const ai = {
   minConfidence: env.ai.minConfidence,
 };
 
-const app = createApp({ db, provider, ai });
+const app = createApp({ db, providers, secrets, ai });
 
 // Production mode: serve the built UI from the same process (see `vp run start`).
 const indexFile = path.join(env.staticDir, "index.html");
@@ -46,9 +45,7 @@ if (fs.existsSync(indexFile)) {
 }
 
 serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
-  console.log(
-    `[ezfin] api listening on http://${info.address}:${info.port} (provider: ${env.provider}, data: ${dbPath()})`,
-  );
+  console.log(`[ezfin] api listening on http://${info.address}:${info.port} (data: ${dbPath()})`);
   if (
     !env.allowNonLocalBind &&
     env.host !== "127.0.0.1" &&

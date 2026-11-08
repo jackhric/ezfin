@@ -22,7 +22,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface Status {
-  provider: { id: "mock" | "simplefin"; connected: boolean; label: string; detail?: string };
+  links: number;
+  demoOnly: boolean;
   lastSyncAt: string | null;
   lastSyncWarnings: string[];
   accounts: number;
@@ -88,13 +89,41 @@ export interface ServerInfo {
   bind: string;
   dataDir: string;
   database: { path: string; bytes: number };
-  provider: "mock" | "simplefin";
   ai: { provider: string; url: string; model: string };
   container: boolean;
   users: number;
 }
 
+export interface Link {
+  id: string;
+  provider: "simplefin" | "demo";
+  label: string;
+  createdAt: string;
+  lastSyncedAt: string | null;
+  warnings: string[];
+  accounts: Account[];
+  detail: string;
+}
+
+export interface SyncResult {
+  accounts: number;
+  transactions: number;
+  syncedAt: string;
+  warnings: string[];
+}
+
 export const api = {
+  links: () => request<{ links: Link[] }>("/api/links"),
+  linkSimplefin: (setupToken: string, label?: string) =>
+    request<{ link: Link; result?: SyncResult }>("/api/links/simplefin", {
+      method: "POST",
+      body: JSON.stringify({ setupToken, label }),
+    }),
+  linkDemo: () =>
+    request<{ link: Link; result: SyncResult }>("/api/links/demo", { method: "POST" }),
+  syncLink: (id: string) =>
+    request<{ result: SyncResult }>(`/api/links/${id}/sync`, { method: "POST" }),
+  unlink: (id: string) => request<{ ok: true }>(`/api/links/${id}`, { method: "DELETE" }),
   authStatus: () => request<{ setupRequired: boolean; user: Me | null }>("/api/auth/status"),
   setup: (body: { username: string; email: string; password: string }) =>
     request<{ user: Me }>("/api/auth/setup", { method: "POST", body: JSON.stringify(body) }),
@@ -167,10 +196,5 @@ export const api = {
         method: "POST",
       },
     ),
-  connectSimplefin: (setupToken: string) =>
-    request<{ ok: true }>("/api/connect/simplefin", {
-      method: "POST",
-      body: JSON.stringify({ setupToken }),
-    }),
   disconnect: () => request<{ ok: true }>("/api/disconnect", { method: "POST" }),
 };

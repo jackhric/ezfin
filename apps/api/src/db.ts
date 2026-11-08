@@ -14,8 +14,27 @@ export interface User {
   createdAt: string;
 }
 
+export type LinkProvider = "simplefin" | "demo";
+
+export interface Link {
+  id: string;
+  userId: string;
+  provider: LinkProvider;
+  label: string;
+  createdAt: string;
+  lastSyncedAt: string | null;
+  warnings: string[];
+}
+
 export interface Db {
   raw: DatabaseSync;
+  /* ---- data-source links (one person can have several) ---- */
+  listLinks(userId: string): Link[];
+  getLink(userId: string, id: string): Link | undefined;
+  createLink(userId: string, provider: LinkProvider, label: string): Link;
+  markLinkSynced(id: string, warnings: string[]): void;
+  /** Removes the link and every account and transaction imported through it. */
+  deleteLink(userId: string, id: string): void;
   /* ---- users and sessions ---- */
   countUsers(): number;
   listUsers(): (User & { accounts: number; lastSeenAt: string | null })[];
@@ -34,7 +53,7 @@ export interface Db {
   getSessionUser(tokenHash: string): User | undefined;
   deleteSession(tokenHash: string): void;
   /* ---- financial data, always scoped to a user ---- */
-  upsertAccounts(userId: string, accounts: Account[]): void;
+  upsertAccounts(userId: string, linkId: string, accounts: Account[]): void;
   upsertTransactions(userId: string, txs: Transaction[]): void;
   listAccounts(userId: string): Account[];
   listTransactions(
@@ -92,9 +111,19 @@ CREATE TABLE IF NOT EXISTS merchant_insights (
   model TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS links (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_synced_at TEXT,
+  warnings TEXT NOT NULL DEFAULT '[]'
+);
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
+  link_id TEXT NOT NULL,
   name TEXT NOT NULL,
   institution TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -145,8 +174,28 @@ const toUser = (r: UserRow): User => ({
   createdAt: r.created_at,
 });
 
+type LinkRow = {
+  id: string;
+  user_id: string;
+  provider: string;
+  label: string;
+  created_at: string;
+  last_synced_at: string | null;
+  warnings: string;
+};
+const toLink = (r: LinkRow): Link => ({
+  id: r.id,
+  userId: r.user_id,
+  provider: r.provider === "simplefin" ? "simplefin" : "demo",
+  label: r.label,
+  createdAt: r.created_at,
+  lastSyncedAt: r.last_synced_at,
+  warnings: JSON.parse(r.warnings) as string[],
+});
+
 type AccountRow = {
   id: string;
+  link_id: string;
   name: string;
   institution: string;
   type: string;
@@ -169,6 +218,7 @@ type TxRow = {
 
 const toAccount = (r: AccountRow): Account => ({
   id: r.id,
+  linkId: r.link_id,
   name: r.name,
   institution: r.institution,
   type: r.type as Account["type"],
@@ -204,7 +254,8 @@ export function openDb(file: string): Db {
     const cols = (raw.prepare("PRAGMA table_info(accounts)").all() as { name: string }[]).map(
       (c) => c.name,
     );
-    if (!cols.includes("user_id")) raw.exec("DROP TABLE accounts; DROP TABLE transactions;");
+    if (!cols.includes("user_id") || !cols.includes("link_id"))
+      raw.exec("DROP TABLE accounts; DROP TABLE transactions;");
   }
   raw.exec(SCHEMA);
   const userCols = (raw.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map(
@@ -227,9 +278,9 @@ export function openDb(file: string): Db {
   }
 
   const upsertAccount = raw.prepare(`
-    INSERT INTO accounts (id, user_id, name, institution, type, currency, balance, available_balance, last_synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, name=excluded.name, institution=excluded.institution, type=excluded.type,
+    INSERT INTO accounts (id, user_id, link_id, name, institution, type, currency, balance, available_balance, last_synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, link_id=excluded.link_id, name=excluded.name, institution=excluded.institution, type=excluded.type,
       currency=excluded.currency, balance=excluded.balance, available_balance=excluded.available_balance,
       last_synced_at=excluded.last_synced_at`);
   const upsertTx = raw.prepare(`
@@ -294,6 +345,7 @@ export function openDb(file: string): Db {
         raw.prepare("DELETE FROM transactions WHERE user_id = ?").run(id);
         raw.prepare("DELETE FROM accounts WHERE user_id = ?").run(id);
         raw.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+        raw.prepare("DELETE FROM links WHERE user_id = ?").run(id);
         raw.prepare("DELETE FROM settings WHERE key LIKE ?").run(`%:${id}`);
         raw.prepare("DELETE FROM users WHERE id = ?").run(id);
         raw.exec("COMMIT");
@@ -338,13 +390,65 @@ export function openDb(file: string): Db {
     deleteSession(tokenHash) {
       raw.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
     },
-    upsertAccounts(userId, accounts) {
+    listLinks(userId) {
+      return (
+        raw
+          .prepare("SELECT * FROM links WHERE user_id = ? ORDER BY created_at")
+          .all(userId) as LinkRow[]
+      ).map(toLink);
+    },
+    getLink(userId, id) {
+      const r = raw.prepare("SELECT * FROM links WHERE user_id = ? AND id = ?").get(userId, id) as
+        | LinkRow
+        | undefined;
+      return r ? toLink(r) : undefined;
+    },
+    createLink(userId, provider, label) {
+      const row: LinkRow = {
+        id: `lnk_${randomUUID()}`,
+        user_id: userId,
+        provider,
+        label,
+        created_at: new Date().toISOString(),
+        last_synced_at: null,
+        warnings: "[]",
+      };
+      raw
+        .prepare(
+          "INSERT INTO links (id, user_id, provider, label, created_at, last_synced_at, warnings) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(row.id, row.user_id, row.provider, row.label, row.created_at, null, row.warnings);
+      return toLink(row);
+    },
+    markLinkSynced(id, warnings) {
+      raw
+        .prepare("UPDATE links SET last_synced_at = ?, warnings = ? WHERE id = ?")
+        .run(new Date().toISOString(), JSON.stringify(warnings), id);
+    },
+    deleteLink(userId, id) {
+      raw.exec("BEGIN");
+      try {
+        raw
+          .prepare(
+            "DELETE FROM transactions WHERE user_id = ? AND account_id IN (SELECT id FROM accounts WHERE link_id = ?)",
+          )
+          .run(userId, id);
+        raw.prepare("DELETE FROM accounts WHERE user_id = ? AND link_id = ?").run(userId, id);
+        raw.prepare("DELETE FROM links WHERE user_id = ? AND id = ?").run(userId, id);
+        raw.exec("COMMIT");
+      } catch (e) {
+        raw.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    upsertAccounts(userId, linkId, accounts) {
       raw.exec("BEGIN");
       try {
         for (const a of accounts) {
           upsertAccount.run(
             a.id,
             userId,
+            linkId,
             a.name,
             a.institution,
             a.type,
@@ -549,6 +653,7 @@ export function openDb(file: string): Db {
     clearData(userId) {
       raw.prepare("DELETE FROM transactions WHERE user_id = ?").run(userId);
       raw.prepare("DELETE FROM accounts WHERE user_id = ?").run(userId);
+      raw.prepare("DELETE FROM links WHERE user_id = ?").run(userId);
     },
     close() {
       raw.close();

@@ -9,7 +9,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,11 @@ export function Layout() {
   const { user, logout } = useAuth();
   const status = useQuery(() => api.status());
   const [syncing, setSyncing] = useState(false);
+  // Links and syncs elsewhere in the app change what the badge should say.
+  useEffect(() => {
+    window.addEventListener("ezfin:synced", status.refetch);
+    return () => window.removeEventListener("ezfin:synced", status.refetch);
+  }, [status.refetch]);
   const [syncError, setSyncError] = useState<string>();
 
   async function sync() {
@@ -90,7 +95,11 @@ export function Layout() {
           {status.data && (
             <div>
               <Badge variant="outline" className="mb-1">
-                {status.data.provider.label}
+                {status.data.links === 0
+                  ? "No data source"
+                  : status.data.demoOnly
+                    ? "Demo data"
+                    : `${status.data.links} ${status.data.links === 1 ? "link" : "links"}`}
               </Badge>
               <div>Synced {relativeTime(status.data.lastSyncAt)}</div>
             </div>

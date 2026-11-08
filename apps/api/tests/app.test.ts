@@ -43,14 +43,18 @@ describe("api", () => {
     ).toBe(true);
   });
 
-  it("rejects simplefin connect in mock mode", async () => {
-    const { app, json } = await makeApp();
-    const res = await app.request("/api/connect/simplefin", {
+  it("rejects a malformed simplefin setup token without creating a link", async () => {
+    const { app, json, headers } = await makeApp();
+    const res = await app.request("/api/links/simplefin", {
       method: "POST",
       headers: json,
-      body: JSON.stringify({ setupToken: "abc" }),
+      body: JSON.stringify({
+        setupToken: Buffer.from("http://not-https.example/claim").toString("base64"),
+      }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(502);
+    const links = await (await app.request("/api/links", { headers })).json();
+    expect(links.links.map((l: { provider: string }) => l.provider)).toEqual(["demo"]);
   });
 });
 

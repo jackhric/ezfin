@@ -27,7 +27,7 @@ vp install
 vp run dev
 ```
 
-That starts the API on `http://127.0.0.1:8787` and the UI on `http://127.0.0.1:5173`. The first visit asks you to create your account (username, email, password). In demo mode, synthetic data is generated for that account on the spot. Or run them separately with `vp run dev:api` and `vp run dev:web`.
+That starts the API on `http://127.0.0.1:8787` and the UI on `http://127.0.0.1:5173`. The first visit asks you to create your account (username, email, password). Then link your bank through SimpleFIN, or load demo data to look around, from Settings > Data source. Or run them separately with `vp run dev:api` and `vp run dev:web`.
 
 To run it as a single process (the API serves the built UI, no Vite dev server):
 
@@ -59,7 +59,7 @@ docker build -t ezfin .
 docker run --rm -p 127.0.0.1:8787:8787 -v ezfin-data:/data ezfin
 ```
 
-Open <http://127.0.0.1:8787>. The database and SimpleFIN credential live in the `ezfin-data` volume. Keep the port published on `127.0.0.1` so nothing else on your network can reach the dashboard. To connect real accounts in the container, set `EZFIN_PROVIDER=simplefin` (there is a commented line in `compose.yaml`) and paste your setup token in Settings.
+Open <http://127.0.0.1:8787>. The database and bank credentials live in the `ezfin-data` volume. Keep the port published on `127.0.0.1` so nothing else on your network can reach the dashboard.
 
 ## Accounts and sign-in
 
@@ -75,30 +75,20 @@ If you later want OAuth, passkeys or email flows, Better Auth is the library to 
 
 ## Connecting real accounts
 
-ezfin ships with a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggregation protocol: you authorize your institutions once at the bridge, it issues a one-time setup token, and the app exchanges that for a read-only access URL. The protocol has no write operations.
+Bank access is a **link on your user account**, not a server setting. Each person on an install links their own banks, and a link imports every account the bridge exposes.
+
+ezfin ships a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggregation protocol: you authorize your institutions once at the bridge, it issues a one-time setup token, and the app exchanges that for a read-only access URL. The protocol has no write operations.
 
 1. Create a bridge account and link your institutions at <https://beta-bridge.simplefin.org>.
 2. Generate a setup token there.
-3. Start in SimpleFIN mode, either as one process or with the dev servers:
-   ```sh
-   EZFIN_PROVIDER=simplefin vp run start
-   # or
-   EZFIN_PROVIDER=simplefin vp run dev:api
-   vp run dev:web
-   ```
-4. Sign in, open Settings, paste the setup token, press Connect. The first sync pulls about 13 months of history. The token is SimpleFIN's own one-time handshake (a base64-encoded claim URL); ezfin exchanges it immediately for a per-user credential file and you never see it again.
+3. In ezfin, open Settings > Data source, press **Link SimpleFIN**, paste the token. The token is SimpleFIN's own one-time handshake (a base64-encoded claim URL); ezfin exchanges it immediately for a per-link credential file and you never see it again. All accounts are imported on the spot, with about 13 months of history.
+4. Press **Sync** on the link (or the global Sync button) whenever you want fresh data. **Unlink** removes the credential and everything imported through it.
 
-The adapter is hand-written against the public protocol spec (<https://www.simplefin.org/protocol.html>, v2) and the bridge developer guide (<https://beta-bridge.simplefin.org/info/developers>). It sends `version=2`, splits history into 90-day windows as the bridge requires, stays far below the 24-requests-per-day guideline, and shows every message from the bridge's error list in Settings.
+You can have several links (two bridge accounts, or demo data alongside a real bank). Account and transaction ids are namespaced per link, so nothing collides.
 
-The access URL is stored in `apps/api/data/simplefin.access` with 0600 permissions and is never displayed again. "Disconnect and wipe" deletes it along with the local database.
+The adapter is hand-written against the public protocol spec (<https://www.simplefin.org/protocol.html>, v2) and the bridge developer guide (<https://beta-bridge.simplefin.org/info/developers>). It sends `version=2`, splits history into 90-day windows as the bridge requires, stays far below the 24-requests-per-day guideline, and shows every message from the bridge's error list on the link.
 
-Other aggregators (Plaid, Teller, MX, a CSV importer) can be added by implementing the small `Provider` interface in `apps/api/src/providers/types.ts`.
-
-## How categorization works
-
-1. `normalizeMerchant` strips processor prefixes (`SQ *`, `TST*`), store numbers, reference codes, phone numbers, and trailing city/state so repeated charges collapse onto one merchant key.
-2. `categorizeOne` checks user overrides first (exact merchant key to category), then an ordered list of regex rules in `packages/core/src/categorize.ts`.
-3. In the UI, changing a transaction's category offers "Always file this merchant here". Accepting stores an override and recategorizes every other auto-categorized transaction from that merchant. Hand-set categories are never overwritten by later syncs.
+Credentials are stored as `apps/api/data/<link id>.secret` with 0600 permissions, outside the database. Other aggregators (Plaid, Teller, MX, a CSV importer) can be added by implementing the small `Provider` interface in `apps/api/src/providers/types.ts` and registering it as a link provider.
 
 ## Local AI categorization (optional)
 
@@ -151,8 +141,9 @@ apps/
     auth.ts           scrypt passwords, cookie sessions, login limiter
     server.ts         entry point, loopback bind, serves web/dist when built
     db.ts             node:sqlite schema and queries
-    sync.ts           provider -> categorize -> persist
-    providers/        mock, simplefin
+    sync.ts           per-link: provider -> categorize -> persist
+    secrets.ts        0600 credential files, one per link
+    providers/        demo (synthetic), simplefin
     ai/               local-model classifier (Ollama or OpenAI-compatible) and background job
   web/src/
     pages/            overview, transactions, categories, recurring, settings/ (one file per section)

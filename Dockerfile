@@ -25,7 +25,6 @@ ENV NODE_ENV=production \
     EZFIN_PORT=8787 \
     EZFIN_DATA_DIR=/data \
     EZFIN_STATIC_DIR=/app/apps/web/dist \
-    EZFIN_PROVIDER=mock \
     EZFIN_ALLOW_NONLOCAL_BIND=1
 WORKDIR /app
 # Runtime needs the API sources, the core package, the built UI and node_modules

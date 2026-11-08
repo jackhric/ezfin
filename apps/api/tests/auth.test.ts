@@ -3,6 +3,8 @@ import { createApp } from "../src/app.ts";
 import { hashPassword, validateCredentials, verifyPassword } from "../src/auth.ts";
 import { openDb } from "../src/db.ts";
 import { MockProvider } from "../src/providers/mock.ts";
+import { SimpleFinProvider } from "../src/providers/simplefin.ts";
+import { MemorySecretStore } from "../src/secrets.ts";
 import { HOST, makeApp } from "./helpers.ts";
 
 const JSON_HOST = { ...HOST, "content-type": "application/json" };
@@ -34,14 +36,18 @@ describe("passwords", () => {
 
 describe("accounts and sessions", () => {
   it("requires setup first, then protects every financial route", async () => {
-    const app = createApp({ db: openDb(":memory:"), provider: new MockProvider(3) });
+    const app = createApp({
+      db: openDb(":memory:"),
+      providers: { demo: new MockProvider(3), simplefin: new SimpleFinProvider() },
+      secrets: new MemorySecretStore(),
+    });
     const status = await (await app.request("/api/auth/status", { headers: HOST })).json();
     expect(status).toEqual({ setupRequired: true, user: null });
     expect((await app.request("/api/summary", { headers: HOST })).status).toBe(401);
     expect((await app.request("/api/transactions", { headers: HOST })).status).toBe(401);
   });
 
-  it("setup signs in, seeds demo data for that user, and refuses a second setup", async () => {
+  it("setup signs in, demo link imports accounts for that user, and refuses a second setup", async () => {
     const { app, headers, userId, db } = await makeApp();
     const me = await (await app.request("/api/me", { headers })).json();
     expect(me.user).toMatchObject({ username: "jack", email: "jack@example.com" });

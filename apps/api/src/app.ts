@@ -27,15 +27,16 @@ import {
 import type { Db, User } from "./db.ts";
 import { STARTED_AT, VERSION, dbPath, env } from "./env.ts";
 import fs from "node:fs";
-import type { Provider } from "./providers/types.ts";
 import { SimpleFinProvider } from "./providers/simplefin.ts";
-import { runSync } from "./sync.ts";
+import type { SecretStore } from "./secrets.ts";
+import { syncLink, syncUser, type SyncDeps } from "./sync.ts";
 import type { AiJob, AiScope } from "./ai/job.ts";
 import type { Classifier } from "./ai/classifier.ts";
 
 export interface AppDeps {
   db: Db;
-  provider: Provider;
+  providers: SyncDeps["providers"];
+  secrets: SecretStore;
   /** Optional local-model categorization. Absent when no classifier is configured. */
   ai?: { job: AiJob; classifier: Classifier; minConfidence: number };
 }
@@ -52,9 +53,19 @@ const strip = <T extends { passwordHash?: string }>(u: T): Omit<T, "passwordHash
  * and every financial route is scoped to the signed-in user. The server only
  * listens on loopback; see PRIVACY.md for the threat model.
  */
-export function createApp({ db, provider, ai }: AppDeps) {
+export function createApp({ db, providers, secrets, ai }: AppDeps) {
   const app = new Hono<Env>();
   const minConfidence = ai?.minConfidence ?? 0.6;
+  const syncDeps: SyncDeps = { providers, secrets, minConfidence };
+  const linkView = (userId: string) =>
+    db.listLinks(userId).map((l) => ({
+      ...l,
+      accounts: db.listAccounts(userId).filter((a) => a.linkId === l.id),
+      detail:
+        l.provider === "simplefin"
+          ? `SimpleFIN Bridge at ${SimpleFinProvider.host(secrets.get(l.id) ?? "")}`
+          : "Synthetic accounts and transactions generated locally, no real financial data",
+    }));
   const limiter = new LoginLimiter();
   const resolver = () => {
     const overrides = db.getOverrides();
@@ -97,8 +108,6 @@ export function createApp({ db, provider, ai }: AppDeps) {
       role: "admin",
     });
     startSession(c, db, user.id);
-    // Demo mode: give the new user something to look at right away.
-    if (provider.id === "mock") await runSync(db, provider, user.id, minConfidence);
     return c.json({ user }, 201);
   });
 
@@ -187,7 +196,6 @@ export function createApp({ db, provider, ai }: AppDeps) {
       bind: `${env.host}:${env.port}`,
       dataDir: env.dataDir,
       database: { path: dbPath(), bytes: dbBytes },
-      provider: env.provider,
       ai: { provider: env.ai.provider, url: env.ai.url, model: env.ai.model },
       container: env.allowNonLocalBind,
       users: db.countUsers(),
@@ -250,22 +258,25 @@ export function createApp({ db, provider, ai }: AppDeps) {
     const id = c.req.param("id");
     if (id === c.get("user").id) return c.json({ error: "You cannot delete yourself." }, 400);
     if (!db.getUserById(id)) return c.json({ error: "not found" }, 404);
-    if (provider instanceof SimpleFinProvider) provider.disconnect(id);
+    for (const l of db.listLinks(id)) secrets.delete(l.id);
     db.deleteUser(id);
     return c.json({ ok: true });
   });
 
   /* ---- Financial data ---- */
 
-  app.get("/api/status", async (c) => {
+  app.get("/api/status", (c) => {
     const user = c.get("user");
-    const status = await provider.describe(user.id);
+    const links = db.listLinks(user.id);
+    const lastSyncAt = links.reduce<string | null>(
+      (m, l) => (l.lastSyncedAt && (!m || l.lastSyncedAt > m) ? l.lastSyncedAt : m),
+      null,
+    );
     return c.json({
-      provider: status,
-      lastSyncAt: db.getSetting(`lastSyncAt:${user.id}`) ?? null,
-      lastSyncWarnings: JSON.parse(
-        db.getSetting(`lastSyncWarnings:${user.id}`) ?? "[]",
-      ) as string[],
+      links: links.length,
+      demoOnly: links.length > 0 && links.every((l) => l.provider === "demo"),
+      lastSyncAt,
+      lastSyncWarnings: links.flatMap((l) => l.warnings),
       accounts: db.listAccounts(user.id).length,
       transactions: db.listTransactions(user.id).length,
     });
@@ -356,33 +367,88 @@ export function createApp({ db, provider, ai }: AppDeps) {
     });
   });
 
+  /** Sync every link the signed-in user has. */
   app.post("/api/sync", async (c) => {
+    const { results, errors } = await syncUser(db, c.get("user").id, syncDeps);
+    // Optionally let the local model fill in whatever the rules could not.
+    if (ai && results.length > 0 && db.getSetting("aiAuto") === "1") ai.job.start("uncategorized");
+    const summary = {
+      accounts: results.reduce((n, r) => n + r.accounts, 0),
+      transactions: results.reduce((n, r) => n + r.transactions, 0),
+      syncedAt: new Date().toISOString(),
+      warnings: results.flatMap((r) => r.warnings),
+      errors,
+    };
+    if (results.length === 0 && errors.length > 0)
+      return c.json({ ...summary, error: errors.map((e) => e.error).join("; ") }, 502);
+    return c.json(summary);
+  });
+
+  /* ---- Data-source links ---- */
+
+  app.get("/api/links", (c) => c.json({ links: linkView(c.get("user").id) }));
+
+  /** Link SimpleFIN: claim the one-time setup token, store the credential, import everything. */
+  app.post("/api/links/simplefin", async (c) => {
+    const user = c.get("user");
+    const body = (await c.req.json().catch(() => ({}))) as { setupToken?: string; label?: string };
+    if (!body.setupToken) return c.json({ error: "setupToken required" }, 400);
+    let accessUrl: string;
     try {
-      const result = await runSync(db, provider, c.get("user").id, minConfidence);
-      // Optionally let the local model fill in whatever the rules could not.
+      accessUrl = await SimpleFinProvider.claim(body.setupToken);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "claim failed" }, 502);
+    }
+    const label =
+      String(body.label ?? "").trim() || `SimpleFIN (${SimpleFinProvider.host(accessUrl)})`;
+    const link = db.createLink(user.id, "simplefin", label);
+    secrets.set(link.id, accessUrl);
+    try {
+      const result = await syncLink(db, link, syncDeps);
+      return c.json({ link: linkView(user.id).find((l) => l.id === link.id), result }, 201);
+    } catch (e) {
+      // Keep the link so the user can retry sync; surface the failure.
+      return c.json(
+        {
+          link: linkView(user.id).find((l) => l.id === link.id),
+          error: e instanceof Error ? e.message : "sync failed",
+        },
+        502,
+      );
+    }
+  });
+
+  /** Add synthetic demo accounts. Safe to do on any install; nothing real is involved. */
+  app.post("/api/links/demo", async (c) => {
+    const user = c.get("user");
+    if (db.listLinks(user.id).some((l) => l.provider === "demo"))
+      return c.json({ error: "Demo data is already linked." }, 409);
+    const link = db.createLink(user.id, "demo", "Demo data");
+    const result = await syncLink(db, link, syncDeps);
+    return c.json({ link: linkView(user.id).find((l) => l.id === link.id), result }, 201);
+  });
+
+  app.post("/api/links/:id/sync", async (c) => {
+    const user = c.get("user");
+    const link = db.getLink(user.id, c.req.param("id"));
+    if (!link) return c.json({ error: "not found" }, 404);
+    try {
+      const result = await syncLink(db, link, syncDeps);
       if (ai && db.getSetting("aiAuto") === "1") ai.job.start("uncategorized");
-      return c.json(result);
+      return c.json({ result });
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "sync failed" }, 502);
     }
   });
 
-  /** Link SimpleFIN to the signed-in user by claiming a setup token. Needs EZFIN_PROVIDER=simplefin. */
-  app.post("/api/connect/simplefin", async (c) => {
-    if (!(provider instanceof SimpleFinProvider)) {
-      return c.json(
-        { error: "Start the API with EZFIN_PROVIDER=simplefin to connect real accounts." },
-        400,
-      );
-    }
-    const body = (await c.req.json().catch(() => ({}))) as { setupToken?: string };
-    if (!body.setupToken) return c.json({ error: "setupToken required" }, 400);
-    try {
-      await provider.claim(c.get("user").id, body.setupToken);
-      return c.json({ ok: true });
-    } catch (e) {
-      return c.json({ error: e instanceof Error ? e.message : "claim failed" }, 502);
-    }
+  /** Unlink: removes the credential and every account and transaction imported through it. */
+  app.delete("/api/links/:id", (c) => {
+    const user = c.get("user");
+    const link = db.getLink(user.id, c.req.param("id"));
+    if (!link) return c.json({ error: "not found" }, 404);
+    secrets.delete(link.id);
+    db.deleteLink(user.id, link.id);
+    return c.json({ ok: true });
   });
 
   /* ---- Local AI ---- */
@@ -436,13 +502,11 @@ export function createApp({ db, provider, ai }: AppDeps) {
     return c.json({ ok: true, recategorized });
   });
 
-  /** Remove the bank link and every account and transaction belonging to the signed-in user. */
+  /** Remove every link, credential, account and transaction belonging to the signed-in user. */
   app.post("/api/disconnect", (c) => {
     const user = c.get("user");
-    if (provider instanceof SimpleFinProvider) provider.disconnect(user.id);
+    for (const l of db.listLinks(user.id)) secrets.delete(l.id);
     db.clearData(user.id);
-    db.deleteSetting(`lastSyncAt:${user.id}`);
-    db.deleteSetting(`lastSyncWarnings:${user.id}`);
     return c.json({ ok: true });
   });
 

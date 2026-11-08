@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { Database, Landmark, RefreshCw } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ErrorBlock, LoadingBlock } from "@/components/page";
 import {
   AlertDialog,
@@ -9,143 +11,292 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
-import { relativeTime } from "@/lib/format";
+import { Label } from "@/components/ui/label";
+import { api, type Link } from "@/lib/api";
+import { moneyExact, relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
-import { Field, Section } from "./layout";
+import { cn } from "@/lib/utils";
+import { Section } from "./layout";
 
+const notifySynced = () => window.dispatchEvent(new Event("ezfin:synced"));
+
+/**
+ * Each person links their own data sources. A SimpleFIN link imports every
+ * account the bridge exposes; demo data is a link like any other.
+ */
 export function DataSourceSettings() {
-  const status = useQuery(() => api.status());
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
+  const links = useQuery(() => api.links());
+  const [params, setParams] = useSearchParams();
+  const [linking, setLinking] = useState(false);
+  const [unlinkTarget, setUnlinkTarget] = useState<Link>();
+  const [busyId, setBusyId] = useState<string>();
   const [msg, setMsg] = useState<string>();
 
-  async function connect() {
-    setBusy(true);
+  // Deep link from the empty-state "Load demo data" button.
+  useEffect(() => {
+    if (params.get("demo") === "1") {
+      setParams({}, { replace: true });
+      void loadDemo();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadDemo() {
+    setBusyId("demo");
     setMsg(undefined);
     try {
-      await api.connectSimplefin(token);
-      setToken("");
-      const r = await api.sync();
-      setMsg(`Connected. Pulled ${r.accounts} accounts and ${r.transactions} transactions.`);
-      status.refetch();
-      window.dispatchEvent(new Event("ezfin:synced"));
+      const { result } = await api.linkDemo();
+      setMsg(`Loaded demo data: ${result.accounts} accounts, ${result.transactions} transactions.`);
+      links.refetch();
+      notifySynced();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "failed");
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
+  async function sync(link: Link) {
+    setBusyId(link.id);
+    setMsg(undefined);
+    try {
+      const { result } = await api.syncLink(link.id);
+      setMsg(
+        `${link.label}: ${result.accounts} accounts, ${result.transactions} transactions pulled.`,
+      );
+      links.refetch();
+      notifySynced();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
+  async function unlink(link: Link) {
+    await api.unlink(link.id);
+    setMsg(`Removed ${link.label} and everything imported through it.`);
+    links.refetch();
+    notifySynced();
+  }
+
+  if (links.error) return <ErrorBlock message={links.error} />;
+  if (!links.data) return <LoadingBlock />;
+  const hasDemo = links.data.links.some((l) => l.provider === "demo");
+
+  return (
+    <Section
+      title="Data source"
+      description="Where your accounts and transactions come from. Links belong to you; other people on this install have their own."
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => setLinking(true)}>
+          <Landmark className="size-4" /> Link SimpleFIN
+        </Button>
+        {!hasDemo && (
+          <Button variant="outline" onClick={loadDemo} disabled={busyId === "demo"}>
+            <Database className="size-4" /> Load demo data
+          </Button>
+        )}
+        {msg && <span className="text-sm text-muted-foreground">{msg}</span>}
+      </div>
+
+      {links.data.links.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Nothing linked yet. SimpleFIN is a read-only bridge to your bank: you authorize your
+          institutions there once, paste the setup token here, and every account it exposes is
+          imported.
+        </p>
+      )}
+
+      <div className="space-y-4">
+        {links.data.links.map((link) => (
+          <div key={link.id} className="rounded-lg border">
+            <div className="flex flex-wrap items-start justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{link.label}</span>
+                  <Badge variant={link.provider === "simplefin" ? "default" : "secondary"}>
+                    {link.provider === "simplefin" ? "SimpleFIN" : "demo"}
+                  </Badge>
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {link.detail}. Linked {relativeTime(link.createdAt)}, last sync{" "}
+                  {relativeTime(link.lastSyncedAt)}.
+                </div>
+                {link.warnings.length > 0 && (
+                  <ul className="mt-2 list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">
+                    {link.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => sync(link)}
+                  disabled={busyId === link.id}
+                >
+                  <RefreshCw className={cn("size-3.5", busyId === link.id && "animate-spin")} />{" "}
+                  Sync
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setUnlinkTarget(link)}>
+                  Unlink
+                </Button>
+              </div>
+            </div>
+            <div className="divide-y border-t">
+              {link.accounts.length === 0 && (
+                <div className="px-4 py-3 text-sm text-muted-foreground">
+                  No accounts imported yet. Try Sync.
+                </div>
+              )}
+              {link.accounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between px-4 py-2 text-sm">
+                  <div>
+                    <div>{a.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {a.institution} · {a.type}
+                    </div>
+                  </div>
+                  <div className={cn("tabular-nums", a.balance < 0 && "text-destructive")}>
+                    {moneyExact(a.balance)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <LinkSimplefinDialog
+        open={linking}
+        onOpenChange={setLinking}
+        onDone={(text) => {
+          setMsg(text);
+          links.refetch();
+          notifySynced();
+        }}
+      />
+
+      <AlertDialog
+        open={Boolean(unlinkTarget)}
+        onOpenChange={(o) => !o && setUnlinkTarget(undefined)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unlink {unlinkTarget?.label}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the stored credential and deletes the{" "}
+              {unlinkTarget?.accounts.length ?? 0} accounts and all transactions imported through it
+              from this computer. You can link again later, which re-imports from scratch.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep</AlertDialogCancel>
+            <AlertDialogAction onClick={() => unlinkTarget && unlink(unlinkTarget)}>
+              Unlink
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </Section>
+  );
+}
+
+function LinkSimplefinDialog({
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onDone: (msg: string) => void;
+}) {
+  const [token, setToken] = useState("");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(undefined);
+    try {
+      const { link, result } = await api.linkSimplefin(token.trim(), label.trim() || undefined);
+      setToken("");
+      setLabel("");
+      onOpenChange(false);
+      onDone(
+        result
+          ? `Linked ${link.label}: imported ${result.accounts} accounts and ${result.transactions} transactions.`
+          : `Linked ${link.label}, but the first import failed. Use Sync to retry.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
   }
 
-  async function disconnect() {
-    await api.disconnect();
-    status.refetch();
-    setMsg("Disconnected and wiped your local data.");
-    window.dispatchEvent(new Event("ezfin:synced"));
-  }
-
-  if (status.error) return <ErrorBlock message={status.error} />;
-  if (!status.data) return <LoadingBlock />;
-  const p = status.data.provider;
-
   return (
-    <Section
-      title="Data source"
-      description="Where your accounts and transactions come from. Each person on this install has their own link."
-    >
-      <div className="space-y-6">
-        <Field label="Provider">
-          <div className="flex items-center gap-2 text-sm">
-            {p.label}
-            <Badge variant={p.connected ? "default" : "outline"}>
-              {p.connected ? "connected" : "not connected"}
-            </Badge>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <form onSubmit={submit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Link SimpleFIN</DialogTitle>
+            <DialogDescription>
+              At bridge.simplefin.org, connect your institutions and generate a setup token. Paste
+              it below. It is exchanged once for a read-only credential that is stored in a private
+              local file; every account the bridge exposes is imported.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="sf-token">Setup token</Label>
+            <Input
+              id="sf-token"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              required
+              autoComplete="off"
+              spellCheck={false}
+            />
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">{p.detail}</p>
-        </Field>
-        <Field label="Synced">
-          <div className="text-sm">
-            {status.data.accounts} accounts, {status.data.transactions} transactions, last sync{" "}
-            {relativeTime(status.data.lastSyncAt)}.
+          <div className="space-y-1">
+            <Label htmlFor="sf-label">Label (optional)</Label>
+            <Input
+              id="sf-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. Personal banks"
+              autoComplete="off"
+            />
           </div>
-        </Field>
-
-        {status.data.lastSyncWarnings.length > 0 && (
-          <Field label="Messages from your bridge">
-            <ul className="list-disc pl-5 text-sm text-muted-foreground">
-              {status.data.lastSyncWarnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          </Field>
-        )}
-
-        {p.id === "mock" && (
-          <Field label="Demo mode" help="Synthetic data generated for your account at setup.">
-            <p className="text-sm text-muted-foreground">
-              To connect real accounts, restart with{" "}
-              <code className="rounded bg-muted px-1">EZFIN_PROVIDER=simplefin vp run start</code>{" "}
-              and come back here.
-            </p>
-          </Field>
-        )}
-
-        {p.id === "simplefin" && (
-          <Field
-            label="SimpleFIN setup token"
-            help="One-time token from bridge.simplefin.org. Exchanged immediately for a read-only credential stored in a private local file; you never see it again."
-          >
-            <div className="flex gap-2">
-              <Input
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Paste setup token"
-                autoComplete="off"
-              />
-              <Button onClick={connect} disabled={busy || !token}>
-                {p.connected ? "Replace" : "Connect"}
-              </Button>
-            </div>
-          </Field>
-        )}
-        {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
-
-        {(p.connected || status.data.accounts > 0) && (
-          <div className="border-t pt-6">
-            <Field
-              label="Disconnect"
-              help="Removes your bank link and deletes your accounts and transactions from this computer. Other people's data is untouched."
-            >
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" disabled={busy}>
-                    Disconnect and wipe my data
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Wipe your financial data?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This deletes your {status.data.accounts} accounts and{" "}
-                      {status.data.transactions} transactions from this computer and removes the
-                      bank credential. It cannot be undone, though you can connect again later.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep</AlertDialogCancel>
-                    <AlertDialogAction onClick={disconnect}>Wipe</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </Field>
-          </div>
-        )}
-      </div>
-    </Section>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !token.trim()}>
+              {busy ? "Importing" : "Link and import"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
