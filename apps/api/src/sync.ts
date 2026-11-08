@@ -14,14 +14,19 @@ export interface SyncResult {
  * First sync fetches ~13 months; later syncs overlap the last 30 days to pick up
  * late-posting or de-pended transactions.
  */
-export async function runSync(db: Db, provider: Provider): Promise<SyncResult> {
+export async function runSync(
+  db: Db,
+  provider: Provider,
+  minConfidence = 0.6,
+): Promise<SyncResult> {
   const last = db.getSetting("lastSyncAt");
   const since = last ? addDays(last.slice(0, 10), -30) : addDays(toISODate(new Date()), -400);
   const { accounts, transactions, warnings = [] } = await provider.fetch(since);
   const overrides = db.getOverrides();
+  const insights = db.getInsights();
   const categorized: Transaction[] = transactions.map((t) => ({
     ...t,
-    categoryId: categorizeOne(t, { overrides }),
+    categoryId: categorizeOne(t, { overrides, insights, minConfidence }),
   }));
   db.upsertAccounts(accounts);
   db.upsertTransactions(categorized);

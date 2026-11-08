@@ -14,10 +14,14 @@ import type { Db } from "./db.ts";
 import type { Provider } from "./providers/types.ts";
 import { SimpleFinProvider } from "./providers/simplefin.ts";
 import { runSync } from "./sync.ts";
+import type { AiJob, AiScope } from "./ai/job.ts";
+import type { Classifier } from "./ai/classifier.ts";
 
 export interface AppDeps {
   db: Db;
   provider: Provider;
+  /** Optional local-model categorization. Absent when no classifier is configured. */
+  ai?: { job: AiJob; classifier: Classifier; minConfidence: number };
 }
 
 /**
@@ -25,8 +29,15 @@ export interface AppDeps {
  * There is no authentication because the server only listens on loopback;
  * see PRIVACY.md for the threat model.
  */
-export function createApp({ db, provider }: AppDeps) {
+export function createApp({ db, provider, ai }: AppDeps) {
   const app = new Hono();
+  const minConfidence = ai?.minConfidence ?? 0.6;
+  const resolver = () => {
+    const overrides = db.getOverrides();
+    const insights = db.getInsights();
+    return (t: Parameters<typeof categorizeOne>[0]) =>
+      categorizeOne(t, { overrides, insights, minConfidence });
+  };
 
   // Belt and braces: refuse requests that did not originate from this machine.
   app.use("*", async (c, next) => {
@@ -87,16 +98,14 @@ export function createApp({ db, provider }: AppDeps) {
     let recategorized = 0;
     if (body.applyToMerchant) {
       db.setOverride(tx.merchant, body.categoryId);
-      const overrides = db.getOverrides();
-      recategorized = db.recategorize((t) => categorizeOne(t, { overrides }));
+      recategorized = db.recategorize(resolver());
     }
     return c.json({ transaction: tx, recategorized });
   });
 
   app.delete("/api/rules/:merchant", (c) => {
     db.deleteOverride(decodeURIComponent(c.req.param("merchant")));
-    const overrides = db.getOverrides();
-    const recategorized = db.recategorize((t) => categorizeOne(t, { overrides }));
+    const recategorized = db.recategorize(resolver());
     return c.json({ ok: true, recategorized });
   });
 
@@ -137,7 +146,9 @@ export function createApp({ db, provider }: AppDeps) {
 
   app.post("/api/sync", async (c) => {
     try {
-      const result = await runSync(db, provider);
+      const result = await runSync(db, provider, minConfidence);
+      // Optionally let the local model fill in whatever the rules could not.
+      if (ai && db.getSetting("aiAuto") === "1") ai.job.start("uncategorized");
       return c.json(result);
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "sync failed" }, 502);
@@ -160,6 +171,57 @@ export function createApp({ db, provider }: AppDeps) {
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "claim failed" }, 502);
     }
+  });
+
+  /* ---- Local AI ---- */
+
+  app.get("/api/ai/status", async (c) => {
+    if (!ai) return c.json({ configured: false });
+    const status = await ai.classifier.status();
+    return c.json({
+      configured: true,
+      ...status,
+      minConfidence,
+      auto: db.getSetting("aiAuto") === "1",
+      insights: db.getInsights().size,
+      job: ai.job.state,
+    });
+  });
+
+  app.post("/api/ai/categorize", async (c) => {
+    if (!ai) return c.json({ error: "No local model configured" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { scope?: AiScope };
+    const scope: AiScope = body.scope === "all" ? "all" : "uncategorized";
+    const status = await ai.classifier.status();
+    if (!status.reachable)
+      return c.json(
+        {
+          error: `Local model server not reachable at ${status.url}: ${status.error ?? "unknown"}`,
+        },
+        502,
+      );
+    if (!status.modelAvailable)
+      return c.json(
+        {
+          error: `Model "${status.model}" is not available. Pull it first (for Ollama: ollama pull ${status.model}).`,
+        },
+        400,
+      );
+    const started = ai.job.start(scope);
+    return c.json({ started, job: ai.job.state }, started ? 202 : 409);
+  });
+
+  app.post("/api/ai/auto", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: boolean };
+    db.setSetting("aiAuto", body.enabled ? "1" : "0");
+    return c.json({ auto: Boolean(body.enabled) });
+  });
+
+  /** Forget everything the model concluded and fall back to rules. User overrides are untouched. */
+  app.delete("/api/ai/insights", (c) => {
+    db.clearInsights();
+    const recategorized = db.recategorize(resolver());
+    return c.json({ ok: true, recategorized });
   });
 
   app.post("/api/disconnect", (c) => {

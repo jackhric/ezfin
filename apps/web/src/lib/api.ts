@@ -43,7 +43,45 @@ export interface Recurring {
   activeCount: number;
 }
 
+export interface AiStatus {
+  configured: boolean;
+  provider?: "ollama" | "openai";
+  url?: string;
+  model?: string;
+  reachable?: boolean;
+  modelAvailable?: boolean;
+  models?: string[];
+  error?: string;
+  minConfidence?: number;
+  auto?: boolean;
+  insights?: number;
+  job?: {
+    running: boolean;
+    scope?: "uncategorized" | "all";
+    total: number;
+    done: number;
+    classified: number;
+    recategorized: number;
+    startedAt?: string;
+    finishedAt?: string;
+    error?: string;
+  };
+}
+
 export const api = {
+  aiStatus: () => request<AiStatus>("/api/ai/status"),
+  aiCategorize: (scope: "uncategorized" | "all") =>
+    request<{ started: boolean }>("/api/ai/categorize", {
+      method: "POST",
+      body: JSON.stringify({ scope }),
+    }),
+  aiAuto: (enabled: boolean) =>
+    request<{ auto: boolean }>("/api/ai/auto", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+  aiForget: () =>
+    request<{ ok: true; recategorized: number }>("/api/ai/insights", { method: "DELETE" }),
   status: () => request<Status>("/api/status"),
   accounts: () => request<{ accounts: Account[]; netWorth: Summary["netWorth"] }>("/api/accounts"),
   categories: () =>

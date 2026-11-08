@@ -1,4 +1,5 @@
-import type { Transaction } from "./types.ts";
+import { CATEGORY_BY_ID } from "./categories.ts";
+import type { MerchantInsight, Transaction } from "./types.ts";
 
 export interface CategoryRule {
   /** Case-insensitive regex tested against the normalized merchant and the raw description. */
@@ -125,9 +126,25 @@ export const DEFAULT_RULES: CategoryRule[] = [
 ];
 
 export interface CategorizeOptions {
-  /** Exact normalized merchant -> categoryId overrides, learned from the user. */
+  /** Exact normalized merchant -> categoryId overrides, learned from the user. Always win. */
   overrides?: ReadonlyMap<string, string>;
+  /** Conclusions from a local model, keyed by merchant. Applied after overrides and before rules. */
+  insights?: ReadonlyMap<string, Pick<MerchantInsight, "categoryId" | "confidence">>;
+  /** Insights below this confidence are ignored. Default 0.6. */
+  minConfidence?: number;
   rules?: CategoryRule[];
+}
+
+/**
+ * Categories that describe money movement rather than spending. The keyword rules
+ * are precise here ("PAYMENT THANK YOU", "PAYROLL", "AUTOPAY" on a card) while a
+ * small model tends to call a card payment "debt" or interest "fees", which would
+ * double count spending. So a model insight may only re-file a transaction among
+ * spending categories, or lift it out of "uncategorized".
+ */
+export function isMoneyMovement(categoryId: string): boolean {
+  const group = CATEGORY_BY_ID.get(categoryId)?.group;
+  return group === "income" || group === "transfer" || categoryId === "savings";
 }
 
 export function categorizeOne(
@@ -136,7 +153,24 @@ export function categorizeOne(
 ): string {
   const override = options.overrides?.get(tx.merchant);
   if (override) return override;
-  const rules = options.rules ?? DEFAULT_RULES;
+  const byRules = categorizeByRules(tx, options.rules ?? DEFAULT_RULES);
+  const insight = options.insights?.get(tx.merchant);
+  if (
+    insight &&
+    insight.categoryId !== "uncategorized" &&
+    insight.confidence >= (options.minConfidence ?? 0.6) &&
+    !isMoneyMovement(byRules) &&
+    (byRules === "uncategorized" || !isMoneyMovement(insight.categoryId))
+  ) {
+    return insight.categoryId;
+  }
+  return byRules;
+}
+
+export function categorizeByRules(
+  tx: Pick<Transaction, "merchant" | "description" | "amount">,
+  rules: CategoryRule[] = DEFAULT_RULES,
+): string {
   const haystack = `${tx.merchant} | ${tx.description}`;
   for (const rule of rules) {
     if (rule.direction === "in" && tx.amount <= 0) continue;

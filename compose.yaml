@@ -8,6 +8,10 @@ services:
       # Set to "simplefin" to connect real accounts, then paste a setup token in Settings.
       EZFIN_PROVIDER: mock
       # EZFIN_PROVIDER: simplefin
+      # Ollama running on the host machine. Keep Ollama bound to localhost on the host.
+      EZFIN_AI_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ezfin-data:/data
     restart: unless-stopped

@@ -177,6 +177,9 @@ export function TransactionsPage() {
                       {t.pending && <Badge variant="secondary">pending</Badge>}
                     </div>
                     <div className="text-xs text-muted-foreground">
+                      {t.merchantLabel && (
+                        <span className="text-foreground/70">{t.merchantLabel} · </span>
+                      )}
                       {accounts.data?.accounts.find((a) => a.id === t.accountId)?.name}
                     </div>
                   </TableCell>

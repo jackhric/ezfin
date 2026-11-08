@@ -26,6 +26,8 @@ export interface Transaction {
   merchant: string;
   categoryId: string;
   pending: boolean;
+  /** Plain-English description of the merchant from the local AI pass, when available. */
+  merchantLabel?: string;
 }
 
 export type CategoryGroup =
@@ -40,6 +42,18 @@ export interface Category {
   id: string;
   name: string;
   group: CategoryGroup;
+  /** One-line definition, used both in the UI and in the local model's prompt. */
+  description: string;
+}
+
+/** What a local model concluded about a merchant key. */
+export interface MerchantInsight {
+  merchant: string;
+  categoryId: string;
+  /** Short plain-English description of the merchant, e.g. "ramen restaurant". */
+  label: string;
+  /** 0..1 */
+  confidence: number;
 }
 
 export type Cadence = "weekly" | "biweekly" | "monthly" | "quarterly" | "annual";

@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { Account, Transaction } from "@ezfin/core";
+import type { Account, MerchantInsight, Transaction } from "@ezfin/core";
 
 export interface Db {
   raw: DatabaseSync;
@@ -20,6 +20,14 @@ export interface Db {
   setOverride(merchant: string, categoryId: string): void;
   deleteOverride(merchant: string): void;
   recategorize(fn: (tx: Transaction) => string): number;
+  getInsights(): Map<string, MerchantInsight>;
+  upsertInsights(insights: MerchantInsight[], model: string): void;
+  clearInsights(): void;
+  /** Merchant-level view for the model: samples, typical amount, how it is categorized today. */
+  listMerchants(filter: {
+    onlyUncategorized: boolean;
+    skipWithInsight: boolean;
+  }): MerchantProfile[];
   getSetting(key: string): string | undefined;
   setSetting(key: string, value: string): void;
   deleteSetting(key: string): void;
@@ -27,7 +35,23 @@ export interface Db {
   close(): void;
 }
 
+export interface MerchantProfile {
+  merchant: string;
+  samples: string[];
+  typicalAmount: number;
+  count: number;
+  categoryId: string;
+}
+
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS merchant_insights (
+  merchant TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -195,27 +219,31 @@ export function openDb(file: string): Db {
       const where: string[] = [];
       const params: (string | number)[] = [];
       if (filter.from) {
-        where.push("posted_at >= ?");
+        where.push("t.posted_at >= ?");
         params.push(filter.from);
       }
       if (filter.to) {
-        where.push("posted_at <= ?");
+        where.push("t.posted_at <= ?");
         params.push(filter.to);
       }
       if (filter.accountId) {
-        where.push("account_id = ?");
+        where.push("t.account_id = ?");
         params.push(filter.accountId);
       }
       if (filter.categoryId) {
-        where.push("category_id = ?");
+        where.push("t.category_id = ?");
         params.push(filter.categoryId);
       }
       if (filter.q) {
-        where.push("(description LIKE ? OR merchant LIKE ?)");
+        where.push("(t.description LIKE ? OR t.merchant LIKE ?)");
         params.push(`%${filter.q}%`, `%${filter.q}%`);
       }
-      const sql = `SELECT * FROM transactions ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY posted_at DESC, id DESC`;
-      return (raw.prepare(sql).all(...params) as TxRow[]).map(toTx);
+      const sql = `SELECT t.*, i.label AS merchant_label FROM transactions t
+        LEFT JOIN merchant_insights i ON i.merchant = t.merchant
+        ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY t.posted_at DESC, t.id DESC`;
+      return (raw.prepare(sql).all(...params) as (TxRow & { merchant_label: string | null })[]).map(
+        (r) => ({ ...toTx(r), merchantLabel: r.merchant_label ?? undefined }),
+      );
     },
     setCategory(txId, categoryId) {
       updateCat.run(categoryId, txId);
@@ -260,6 +288,74 @@ export function openDb(file: string): Db {
       }
       return changed;
     },
+    getInsights() {
+      const rows = raw
+        .prepare("SELECT merchant, category_id, label, confidence FROM merchant_insights")
+        .all() as {
+        merchant: string;
+        category_id: string;
+        label: string;
+        confidence: number;
+      }[];
+      return new Map(
+        rows.map((r) => [
+          r.merchant,
+          {
+            merchant: r.merchant,
+            categoryId: r.category_id,
+            label: r.label,
+            confidence: r.confidence,
+          },
+        ]),
+      );
+    },
+    upsertInsights(insights, model) {
+      const stmt =
+        raw.prepare(`INSERT INTO merchant_insights (merchant, category_id, label, confidence, model, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(merchant) DO UPDATE SET category_id=excluded.category_id, label=excluded.label,
+          confidence=excluded.confidence, model=excluded.model, created_at=excluded.created_at`);
+      const now = new Date().toISOString();
+      raw.exec("BEGIN");
+      try {
+        for (const i of insights)
+          stmt.run(i.merchant, i.categoryId, i.label, i.confidence, model, now);
+        raw.exec("COMMIT");
+      } catch (e) {
+        raw.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    clearInsights() {
+      raw.exec("DELETE FROM merchant_insights");
+    },
+    listMerchants(filter) {
+      const where: string[] = ["t.merchant <> ''"];
+      if (filter.onlyUncategorized)
+        where.push("t.category_id = 'uncategorized' AND t.user_categorized = 0");
+      if (filter.skipWithInsight)
+        where.push("NOT EXISTS (SELECT 1 FROM merchant_insights i WHERE i.merchant = t.merchant)");
+      const rows = raw
+        .prepare(`
+        SELECT t.merchant, AVG(t.amount) AS typical, COUNT(*) AS n, MIN(t.category_id) AS category_id,
+               GROUP_CONCAT(DISTINCT t.description) AS descs
+        FROM transactions t WHERE ${where.join(" AND ")}
+        GROUP BY t.merchant ORDER BY n DESC`)
+        .all() as {
+        merchant: string;
+        typical: number;
+        n: number;
+        category_id: string;
+        descs: string;
+      }[];
+      return rows.map((r) => ({
+        merchant: r.merchant,
+        samples: r.descs.split(",").slice(0, 3),
+        typicalAmount: Math.round(r.typical * 100) / 100,
+        count: r.n,
+        categoryId: r.category_id,
+      }));
+    },
     getSetting(key) {
       const row = raw.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
         | { value: string }
@@ -277,7 +373,7 @@ export function openDb(file: string): Db {
       raw.prepare("DELETE FROM settings WHERE key = ?").run(key);
     },
     clearData() {
-      raw.exec("DELETE FROM transactions; DELETE FROM accounts;");
+      raw.exec("DELETE FROM transactions; DELETE FROM accounts; DELETE FROM merchant_insights;");
     },
     close() {
       raw.close();

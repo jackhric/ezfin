@@ -9,6 +9,7 @@ Everything runs on your machine. See [PRIVACY.md](./PRIVACY.md) for the guarante
 - **Vite+** (`vp`) as the toolchain: dev server, build, test, lint, format, and task runner in one CLI.
 - **React 19 + TypeScript** with **Tailwind v4** and **shadcn/ui** (Nova preset, Radix primitives, Recharts).
 - **Hono** on Node with the built-in `node:sqlite` for the local API. No native modules to compile.
+- **Ollama** (or any OpenAI-compatible local server) for optional on-device AI categorization with a small model such as `qwen3:4b`.
 - **pnpm workspace** with three packages:
 
 | Package         | Purpose                                                                                                                          |
@@ -87,6 +88,32 @@ Other aggregators (Plaid, Teller, MX, a CSV importer) can be added by implementi
 2. `categorizeOne` checks user overrides first (exact merchant key to category), then an ordered list of regex rules in `packages/core/src/categorize.ts`.
 3. In the UI, changing a transaction's category offers "Always file this merchant here". Accepting stores an override and recategorizes every other auto-categorized transaction from that merchant. Hand-set categories are never overwritten by later syncs.
 
+## Local AI categorization (optional)
+
+Rules get the obvious merchants right. For everything else, ezfin can ask a small language model running **on your machine** to say what a merchant is and which category it belongs to. The result is a plain-English label under each transaction (for example "ramen restaurant" or "cloud storage subscription") and a category for merchants the rules could not place.
+
+Setup with Ollama, the default:
+
+```sh
+# install from https://ollama.com, then
+ollama pull qwen3:4b
+vp run start
+```
+
+Open Settings, confirm the Local AI card says "ready", and press **Categorize unknowns**. **Re-examine everything** lets the model overrule the rules when it is confident. The switch under the buttons runs the model on new unknown merchants after every sync.
+
+How it works:
+
+- The API groups transactions by merchant key and sends the model batches of merchants: the key, up to three raw descriptions, a typical amount and a count. Nothing else.
+- The model answers with structured JSON (enforced by a JSON schema) containing a category id, a short label and a confidence.
+- Answers are validated (unknown merchants and invalid categories are dropped) and stored in the local `merchant_insights` table.
+- Categories resolve as: your own choices, then the model when confidence is at least `EZFIN_AI_MIN_CONFIDENCE` (0.6), then the built-in rules. Hand-set categories are never touched.
+- "Forget model results" wipes the table and recategorizes from rules again.
+
+Privacy enforcement: the API refuses any AI endpoint whose hostname is not loopback (or `host.docker.internal` inside the container). To point at something else you must set `EZFIN_AI_ALLOW_REMOTE=1` deliberately.
+
+Other servers: any OpenAI-compatible endpoint (LM Studio, llama.cpp `llama-server`, vLLM) works with `EZFIN_AI_PROVIDER=openai`, `EZFIN_AI_URL=http://127.0.0.1:1234` and `EZFIN_AI_MODEL=<name>`. Models in the 3B to 4B range tested or expected to work well: `qwen3:4b` (tested), `gemma3:4b`, `llama3.2:3b`, `phi4-mini`. On a CPU-only machine a batch of 12 merchants takes about a minute; on Apple Silicon or a GPU it is a few seconds.
+
 ## How recurring detection works
 
 `detectRecurring` in `packages/core/src/recurring.ts` needs no merchant list:
@@ -113,6 +140,7 @@ apps/
     db.ts             node:sqlite schema and queries
     sync.ts           provider -> categorize -> persist
     providers/        mock, simplefin
+    ai/               local-model classifier (Ollama or OpenAI-compatible) and background job
   web/src/
     pages/            overview, transactions, categories, recurring, settings
     components/       layout, stat, category-badge, ui/ (shadcn)

@@ -1,6 +1,7 @@
 import { CATEGORY_BY_ID } from "@ezfin/core";
 import { useState } from "react";
 import { CategoryBadge } from "@/components/category-badge";
+import { LocalAiCard } from "@/components/local-ai-card";
 import { ErrorBlock, LoadingBlock, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,12 +150,12 @@ export function SettingsPage() {
                 except itself.
               </li>
               <li>
-                Categorization and subscription detection are rule-based and run locally. No AI
-                service sees your transactions.
+                Categorization and subscription detection run locally. The optional AI step talks
+                only to a model server on this machine; the API refuses any other address.
               </li>
               <li>
-                The only outbound connection is from the API to your aggregator (SimpleFIN) when you
-                press Sync.
+                The only outbound connections are from the API to your aggregator (SimpleFIN) when
+                you press Sync, and to your local model server when you run AI categorization.
               </li>
               <li>
                 The data folder and all database files are ignored by git, so they cannot be
@@ -164,7 +165,9 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <LocalAiCard />
+
+        <Card>
           <CardHeader>
             <CardTitle>Learned merchant rules</CardTitle>
             <CardDescription>

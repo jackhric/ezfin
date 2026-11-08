@@ -7,6 +7,8 @@ import { openDb } from "./db.ts";
 import { dbPath, env } from "./env.ts";
 import { MockProvider, SimpleFinProvider, type Provider } from "./providers/index.ts";
 import { runSync } from "./sync.ts";
+import { LocalClassifier } from "./ai/classifier.ts";
+import { AiJob } from "./ai/job.ts";
 
 const db = openDb(dbPath());
 const provider: Provider =
@@ -16,11 +18,25 @@ const provider: Provider =
 
 // Demo mode: make sure there is something to look at.
 if (env.provider === "mock" && db.listAccounts().length === 0) {
-  const r = await runSync(db, provider);
+  const r = await runSync(db, provider, env.ai.minConfidence);
   console.log(`[ezfin] seeded demo data: ${r.accounts} accounts, ${r.transactions} transactions`);
 }
 
-const app = createApp({ db, provider });
+// Local AI is always wired up; whether a model server is actually running is reported by /api/ai/status.
+const classifier = new LocalClassifier({
+  ...env.ai,
+  extraLocalHosts: env.allowNonLocalBind ? ["host.docker.internal"] : [],
+});
+const ai = {
+  classifier,
+  job: new AiJob(db, classifier, {
+    batchSize: env.ai.batchSize,
+    minConfidence: env.ai.minConfidence,
+  }),
+  minConfidence: env.ai.minConfidence,
+};
+
+const app = createApp({ db, provider, ai });
 
 // Production mode: serve the built UI from the same process (see `vp run start`).
 const indexFile = path.join(env.staticDir, "index.html");
