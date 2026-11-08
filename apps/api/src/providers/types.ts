@@ -10,9 +10,14 @@ export interface Provider {
   /** Human-readable status for the Settings page. Must never include secrets. */
   describe(): Promise<ProviderStatus>;
   /** Fetch everything since `sinceISO` (inclusive). Transactions may arrive uncategorized. */
-  fetch(
-    sinceISO: string,
-  ): Promise<{ accounts: Account[]; transactions: Omit<Transaction, "categoryId">[] }>;
+  fetch(sinceISO: string): Promise<ProviderFetch>;
+}
+
+export interface ProviderFetch {
+  accounts: Account[];
+  transactions: Omit<Transaction, "categoryId">[];
+  /** Non-fatal messages from the provider that the user should see (e.g. a bank needs re-login). */
+  warnings?: string[];
 }
 
 export interface ProviderStatus {

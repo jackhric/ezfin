@@ -6,6 +6,7 @@ export interface SyncResult {
   accounts: number;
   transactions: number;
   syncedAt: string;
+  warnings: string[];
 }
 
 /**
@@ -16,7 +17,7 @@ export interface SyncResult {
 export async function runSync(db: Db, provider: Provider): Promise<SyncResult> {
   const last = db.getSetting("lastSyncAt");
   const since = last ? addDays(last.slice(0, 10), -30) : addDays(toISODate(new Date()), -400);
-  const { accounts, transactions } = await provider.fetch(since);
+  const { accounts, transactions, warnings = [] } = await provider.fetch(since);
   const overrides = db.getOverrides();
   const categorized: Transaction[] = transactions.map((t) => ({
     ...t,
@@ -26,5 +27,6 @@ export async function runSync(db: Db, provider: Provider): Promise<SyncResult> {
   db.upsertTransactions(categorized);
   const syncedAt = new Date().toISOString();
   db.setSetting("lastSyncAt", syncedAt);
-  return { accounts: accounts.length, transactions: categorized.length, syncedAt };
+  db.setSetting("lastSyncWarnings", JSON.stringify(warnings));
+  return { accounts: accounts.length, transactions: categorized.length, syncedAt, warnings };
 }

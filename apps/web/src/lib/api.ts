@@ -24,6 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Status {
   provider: { id: "mock" | "simplefin"; connected: boolean; label: string; detail?: string };
   lastSyncAt: string | null;
+  lastSyncWarnings: string[];
   accounts: number;
   transactions: number;
 }
@@ -66,9 +67,12 @@ export const api = {
   deleteRule: (merchant: string) =>
     request<{ ok: true }>(`/api/rules/${encodeURIComponent(merchant)}`, { method: "DELETE" }),
   sync: () =>
-    request<{ accounts: number; transactions: number; syncedAt: string }>("/api/sync", {
-      method: "POST",
-    }),
+    request<{ accounts: number; transactions: number; syncedAt: string; warnings: string[] }>(
+      "/api/sync",
+      {
+        method: "POST",
+      },
+    ),
   connectSimplefin: (setupToken: string) =>
     request<{ ok: true }>("/api/connect/simplefin", {
       method: "POST",

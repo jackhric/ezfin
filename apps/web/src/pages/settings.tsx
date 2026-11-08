@@ -74,6 +74,17 @@ export function SettingsPage() {
               </span>
             </div>
 
+            {status.data.lastSyncWarnings.length > 0 && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+                <p className="font-medium">Messages from your bridge</p>
+                <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                  {status.data.lastSyncWarnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {p.id === "mock" && (
               <div className="rounded-md border bg-muted/40 p-3">
                 <p className="font-medium">You are looking at demo data.</p>

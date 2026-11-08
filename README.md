@@ -75,6 +75,8 @@ ezfin ships with a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggreg
    ```
 4. Open Settings in the UI, paste the setup token, press Connect. The first sync pulls about 13 months of history.
 
+The adapter is hand-written against the public protocol spec (<https://www.simplefin.org/protocol.html>, v2) and the bridge developer guide (<https://beta-bridge.simplefin.org/info/developers>). It sends `version=2`, splits history into 90-day windows as the bridge requires, stays far below the 24-requests-per-day guideline, and shows every message from the bridge's error list in Settings.
+
 The access URL is stored in `apps/api/data/simplefin.access` with 0600 permissions and is never displayed again. "Disconnect and wipe" deletes it along with the local database.
 
 Other aggregators (Plaid, Teller, MX, a CSV importer) can be added by implementing the small `Provider` interface in `apps/api/src/providers/types.ts`.

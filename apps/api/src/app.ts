@@ -45,6 +45,7 @@ export function createApp({ db, provider }: AppDeps) {
     return c.json({
       provider: status,
       lastSyncAt: db.getSetting("lastSyncAt") ?? null,
+      lastSyncWarnings: JSON.parse(db.getSetting("lastSyncWarnings") ?? "[]") as string[],
       accounts: db.listAccounts().length,
       transactions: db.listTransactions().length,
     });
@@ -165,6 +166,7 @@ export function createApp({ db, provider }: AppDeps) {
     if (provider instanceof SimpleFinProvider) provider.disconnect();
     db.clearData();
     db.deleteSetting("lastSyncAt");
+    db.deleteSetting("lastSyncWarnings");
     return c.json({ ok: true });
   });
 
