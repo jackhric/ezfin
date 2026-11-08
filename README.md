@@ -28,6 +28,14 @@ vp run dev
 
 That starts the API on `http://127.0.0.1:8787` and the UI on `http://127.0.0.1:5173`, seeded with synthetic demo data. Or run them separately with `vp run dev:api` and `vp run dev:web`.
 
+To run it as a single process (the API serves the built UI, no Vite dev server):
+
+```sh
+vp run start
+```
+
+Then open <http://127.0.0.1:8787>.
+
 Other tasks:
 
 ```sh
@@ -37,14 +45,31 @@ vp run -r build    # production build
 vp run seed        # regenerate the demo database
 ```
 
+## Running in a container
+
+```sh
+docker compose up --build
+```
+
+Or without compose:
+
+```sh
+docker build -t ezfin .
+docker run --rm -p 127.0.0.1:8787:8787 -v ezfin-data:/data ezfin
+```
+
+Open <http://127.0.0.1:8787>. The database and SimpleFIN credential live in the `ezfin-data` volume. Keep the port published on `127.0.0.1` so nothing else on your network can reach the dashboard. To connect real accounts in the container, set `EZFIN_PROVIDER=simplefin` (there is a commented line in `compose.yaml`) and paste your setup token in Settings.
+
 ## Connecting real accounts
 
 ezfin ships with a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggregation protocol: you authorize your institutions once at the bridge, it issues a one-time setup token, and the app exchanges that for a read-only access URL. The protocol has no write operations.
 
 1. Create a bridge account and link your institutions at <https://beta-bridge.simplefin.org>.
 2. Generate a setup token there.
-3. Start the API in SimpleFIN mode:
+3. Start in SimpleFIN mode, either as one process or with the dev servers:
    ```sh
+   EZFIN_PROVIDER=simplefin vp run start
+   # or
    EZFIN_PROVIDER=simplefin vp run dev:api
    vp run dev:web
    ```
@@ -82,7 +107,7 @@ See [.env.example](./.env.example). The defaults are safe: mock data, loopback o
 apps/
   api/src/
     app.ts            Hono routes
-    server.ts         entry point, loopback bind
+    server.ts         entry point, loopback bind, serves web/dist when built
     db.ts             node:sqlite schema and queries
     sync.ts           provider -> categorize -> persist
     providers/        mock, simplefin

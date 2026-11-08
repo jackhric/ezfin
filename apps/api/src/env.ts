@@ -12,6 +12,10 @@ export const env = {
   provider: (process.env.EZFIN_PROVIDER ?? "mock") as "mock" | "simplefin",
   /** Optional: a SimpleFIN access URL. If unset, the one claimed through the UI (stored in dataDir) is used. */
   simplefinAccessUrl: process.env.SIMPLEFIN_ACCESS_URL,
+  /** Directory holding the built web app. When it exists, the API serves it so one process is the whole app. */
+  staticDir: process.env.EZFIN_STATIC_DIR ?? path.resolve(import.meta.dirname, "../../web/dist"),
+  /** Set by the Dockerfile: inside a container the process must bind to the container interface. */
+  allowNonLocalBind: process.env.EZFIN_ALLOW_NONLOCAL_BIND === "1",
 };
 
 export function dbPath(): string {

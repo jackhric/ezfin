@@ -1,0 +1,16 @@
+services:
+  ezfin:
+    build: .
+    # Bound to loopback on the host on purpose. Do not change to "8787:8787".
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      # Set to "simplefin" to connect real accounts, then paste a setup token in Settings.
+      EZFIN_PROVIDER: mock
+      # EZFIN_PROVIDER: simplefin
+    volumes:
+      - ezfin-data:/data
+    restart: unless-stopped
+
+volumes:
+  ezfin-data:

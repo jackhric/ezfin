@@ -1,4 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
 import { dbPath, env } from "./env.ts";
@@ -19,11 +22,30 @@ if (env.provider === "mock" && db.listAccounts().length === 0) {
 
 const app = createApp({ db, provider });
 
+// Production mode: serve the built UI from the same process (see `vp run start`).
+const indexFile = path.join(env.staticDir, "index.html");
+if (fs.existsSync(indexFile)) {
+  const root = path.relative(process.cwd(), env.staticDir) || ".";
+  app.use("/assets/*", serveStatic({ root }));
+  const index = fs.readFileSync(indexFile, "utf8");
+  app.get("*", (c) => c.html(index));
+  console.log(`[ezfin] serving web app from ${env.staticDir}`);
+} else {
+  console.log(
+    "[ezfin] no web build found; run the UI with `vp run dev:web` or build it with `vp run web#build`",
+  );
+}
+
 serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
   console.log(
     `[ezfin] api listening on http://${info.address}:${info.port} (provider: ${env.provider}, data: ${dbPath()})`,
   );
-  if (env.host !== "127.0.0.1" && env.host !== "localhost" && env.host !== "::1") {
+  if (
+    !env.allowNonLocalBind &&
+    env.host !== "127.0.0.1" &&
+    env.host !== "localhost" &&
+    env.host !== "::1"
+  ) {
     console.warn(
       "[ezfin] WARNING: EZFIN_HOST is not loopback. Your financial data would be reachable from the network.",
     );
