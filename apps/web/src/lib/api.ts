@@ -1,0 +1,78 @@
+import type {
+  Account,
+  Category,
+  CategoryTotal,
+  MonthSummary,
+  RecurringSeries,
+  Transaction,
+} from "@ezfin/core";
+
+/**
+ * Thin fetch wrapper. All calls go to the same-origin `/api`, which the Vite dev
+ * server proxies to the local API on 127.0.0.1. Nothing is sent anywhere else.
+ */
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json" },
+  });
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body;
+}
+
+export interface Status {
+  provider: { id: "mock" | "simplefin"; connected: boolean; label: string; detail?: string };
+  lastSyncAt: string | null;
+  accounts: number;
+  transactions: number;
+}
+
+export interface Summary {
+  netWorth: { assets: number; debts: number; net: number };
+  current: MonthSummary;
+  months: MonthSummary[];
+  categoryTotals: CategoryTotal[];
+  uncategorized: number;
+}
+
+export interface Recurring {
+  series: RecurringSeries[];
+  monthlyTotal: number;
+  activeCount: number;
+}
+
+export const api = {
+  status: () => request<Status>("/api/status"),
+  accounts: () => request<{ accounts: Account[]; netWorth: Summary["netWorth"] }>("/api/accounts"),
+  categories: () =>
+    request<{ categories: Category[]; overrides: Record<string, string> }>("/api/categories"),
+  summary: (months = 12) => request<Summary>(`/api/summary?months=${months}`),
+  recurring: () => request<Recurring>("/api/recurring"),
+  transactions: (params: Record<string, string | undefined> = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])),
+    );
+    return request<{ transactions: Transaction[]; total: number }>(`/api/transactions?${qs}`);
+  },
+  setCategory: (id: string, categoryId: string, applyToMerchant: boolean) =>
+    request<{ transaction: Transaction; recategorized: number }>(
+      `/api/transactions/${id}/category`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ categoryId, applyToMerchant }),
+      },
+    ),
+  deleteRule: (merchant: string) =>
+    request<{ ok: true }>(`/api/rules/${encodeURIComponent(merchant)}`, { method: "DELETE" }),
+  sync: () =>
+    request<{ accounts: number; transactions: number; syncedAt: string }>("/api/sync", {
+      method: "POST",
+    }),
+  connectSimplefin: (setupToken: string) =>
+    request<{ ok: true }>("/api/connect/simplefin", {
+      method: "POST",
+      body: JSON.stringify({ setupToken }),
+    }),
+  disconnect: () => request<{ ok: true }>("/api/disconnect", { method: "POST" }),
+};

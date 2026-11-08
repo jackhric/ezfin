@@ -1,0 +1,23 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vpx --watch src/server.ts",
+    "start": "vpx src/server.ts",
+    "seed": "vpx src/seed.ts",
+    "test": "vp test",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ezfin/core": "workspace:*",
+    "@hono/node-server": "^1.19.0",
+    "hono": "^4.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

@@ -1,0 +1,4 @@
+# Local financial data. Never commit.
+data/*
+!data/.gitkeep
+.env
