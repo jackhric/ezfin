@@ -121,13 +121,12 @@ describe("scheduler", () => {
     };
     await app.request("/api/links/demo", { method: "POST", headers: sam });
 
-    const five = new Date(2026, 10, 8, 5, 0, 10);
-    expect(await scheduler.tick(new Date(2026, 10, 8, 4, 59, 0))).toBe(false);
-    expect(await scheduler.tick(five)).toBe(true);
-    expect(await scheduler.tick(new Date(2026, 10, 8, 5, 0, 40))).toBe(false); // same slot
+    expect(await scheduler.tick(new Date(2026, 10, 8, 5, 22, 0))).toBe(false);
+    expect(await scheduler.tick(new Date(2026, 10, 8, 5, 23, 10))).toBe(true);
+    expect(await scheduler.tick(new Date(2026, 10, 8, 5, 23, 40))).toBe(false); // same slot
     const status = scheduler.status(new Date(2026, 10, 8, 6, 0, 0));
     expect(status.lastRun).toMatchObject({
-      slot: "2026-11-08 05:00",
+      slot: "2026-11-08 05:23",
       users: 2,
       links: 2,
       errors: [],
