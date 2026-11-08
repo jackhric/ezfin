@@ -14,7 +14,7 @@ ezfin is built so that the person running it is the only party that ever sees th
 
 ## Sign-in
 
-The app has its own accounts so that two people sharing a computer cannot see each other's finances, and so that a browser tab left open does not expose everything forever (sessions expire after 30 days, and sign-out deletes the session server-side). Passwords are hashed with scrypt (N=2^15, r=8, p=1) and a 16-byte random salt. Session cookies are httpOnly and SameSite=Strict; the database stores only a SHA-256 of the token, so a copied database file cannot be replayed as a login. Ten failed logins in 15 minutes pause sign-in. None of this is a substitute for OS-level protection: anyone who can read the data folder can read the data.
+The app has its own accounts so that two people sharing a computer cannot see each other's finances, and so that a browser tab left open does not expose everything forever (sessions expire after 30 days, and sign-out deletes the session server-side). Passwords are hashed with scrypt (N=2^15, r=8, p=1) and a 16-byte random salt. Session cookies are httpOnly and SameSite=Strict; the database stores only a SHA-256 of the token, so a copied database file cannot be replayed as a login. Ten failed logins in 15 minutes pause sign-in. The first account is an administrator; administrators can create, delete and reset passwords for other users but cannot read their financial data through the API, which is scoped to the session's own user everywhere. None of this is a substitute for OS-level protection: anyone who can read the data folder can read the data.
 
 ## Running in Docker
 

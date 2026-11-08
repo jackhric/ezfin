@@ -12,15 +12,21 @@ import {
 } from "@ezfin/core";
 import {
   LoginLimiter,
+  currentTokenHash,
   currentUser,
   endSession,
   hashPassword,
+  requireAdmin,
   requireUser,
   startSession,
   validateCredentials,
+  validatePassword,
+  validateProfile,
   verifyPassword,
 } from "./auth.ts";
 import type { Db, User } from "./db.ts";
+import { STARTED_AT, VERSION, dbPath, env } from "./env.ts";
+import fs from "node:fs";
 import type { Provider } from "./providers/types.ts";
 import { SimpleFinProvider } from "./providers/simplefin.ts";
 import { runSync } from "./sync.ts";
@@ -35,6 +41,11 @@ export interface AppDeps {
 }
 
 type Env = { Variables: { user: User } };
+
+const strip = <T extends { passwordHash?: string }>(u: T): Omit<T, "passwordHash"> => {
+  const { passwordHash: _omit, ...rest } = u;
+  return rest;
+};
 
 /**
  * The local JSON API. Every route reads from or writes to the local SQLite file,
@@ -83,6 +94,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
       username: v.username,
       email: v.email,
       passwordHash: await hashPassword(v.password),
+      role: "admin",
     });
     startSession(c, db, user.id);
     // Demo mode: give the new user something to look at right away.
@@ -103,8 +115,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
     }
     limiter.reset();
     startSession(c, db, user.id);
-    const { passwordHash: _omit, ...safe } = user;
-    return c.json({ user: safe });
+    return c.json({ user: strip(user) });
   });
 
   app.post("/api/auth/logout", (c) => {
@@ -115,6 +126,8 @@ export function createApp({ db, provider, ai }: AppDeps) {
   // Everything below requires a session.
   app.use("/api/*", requireUser(db));
 
+  /* ---- Account settings (the signed-in person) ---- */
+
   /** The signed-in user plus the financial accounts that belong to them. */
   app.get("/api/me", (c) => {
     const user = c.get("user");
@@ -122,8 +135,68 @@ export function createApp({ db, provider, ai }: AppDeps) {
     return c.json({ user, accounts, netWorth: netWorth(accounts) });
   });
 
-  /** A signed-in user may add another person to this install. */
-  app.post("/api/auth/users", async (c) => {
+  app.patch("/api/me", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const v = validateProfile(body);
+    if (!v.ok) return c.json({ error: v.error }, 400);
+    const me = c.get("user");
+    if (v.username && v.username.toLowerCase() !== me.username.toLowerCase()) {
+      if (db.getUserByUsername(v.username))
+        return c.json({ error: "That username is taken." }, 409);
+    }
+    const user = db.updateUser(me.id, { username: v.username, email: v.email });
+    return c.json({ user: user });
+  });
+
+  app.post("/api/me/password", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { current?: string; next?: string };
+    const me = db.getUserById(c.get("user").id)!;
+    if (!(await verifyPassword(String(body.current ?? ""), me.passwordHash)))
+      return c.json({ error: "Current password is wrong." }, 400);
+    const bad = validatePassword(body.next);
+    if (bad) return c.json({ error: bad }, 400);
+    db.setPassword(me.id, await hashPassword(String(body.next)));
+    // Changing a password invalidates every other session.
+    db.deleteSessionsForUser(me.id, currentTokenHash(c));
+    return c.json({ ok: true });
+  });
+
+  /** Sign out everywhere except here. */
+  app.delete("/api/me/sessions", (c) => {
+    db.deleteSessionsForUser(c.get("user").id, currentTokenHash(c));
+    return c.json({ ok: true });
+  });
+
+  /* ---- Server administration (admins only) ---- */
+
+  app.use("/api/server/*", requireAdmin());
+  app.use("/api/users", requireAdmin());
+  app.use("/api/users/*", requireAdmin());
+
+  app.get("/api/server/info", (c) => {
+    let dbBytes = 0;
+    try {
+      dbBytes = fs.statSync(dbPath()).size;
+    } catch {
+      /* in-memory or missing */
+    }
+    return c.json({
+      version: VERSION,
+      node: process.version,
+      startedAt: STARTED_AT,
+      bind: `${env.host}:${env.port}`,
+      dataDir: env.dataDir,
+      database: { path: dbPath(), bytes: dbBytes },
+      provider: env.provider,
+      ai: { provider: env.ai.provider, url: env.ai.url, model: env.ai.model },
+      container: env.allowNonLocalBind,
+      users: db.countUsers(),
+    });
+  });
+
+  app.get("/api/users", (c) => c.json({ users: db.listUsers() }));
+
+  app.post("/api/users", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const v = validateCredentials(body);
     if (!v.ok) return c.json({ error: v.error }, 400);
@@ -132,8 +205,54 @@ export function createApp({ db, provider, ai }: AppDeps) {
       username: v.username,
       email: v.email,
       passwordHash: await hashPassword(v.password),
+      role: body.role === "admin" ? "admin" : "member",
     });
     return c.json({ user }, 201);
+  });
+
+  app.patch("/api/users/:id", async (c) => {
+    const id = c.req.param("id");
+    const target = db.getUserById(id);
+    if (!target) return c.json({ error: "not found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const v = validateProfile(body);
+    if (!v.ok) return c.json({ error: v.error }, 400);
+    const role = body.role === "admin" ? "admin" : body.role === "member" ? "member" : undefined;
+    if (
+      role === "member" &&
+      target.role === "admin" &&
+      db.listUsers().filter((u) => u.role === "admin").length === 1
+    )
+      return c.json({ error: "There must be at least one administrator." }, 400);
+    if (
+      v.username &&
+      v.username.toLowerCase() !== target.username.toLowerCase() &&
+      db.getUserByUsername(v.username)
+    )
+      return c.json({ error: "That username is taken." }, 409);
+    const user = db.updateUser(id, { username: v.username, email: v.email, role });
+    return c.json({ user: user });
+  });
+
+  /** Admin reset of someone's password. Signs them out everywhere. */
+  app.post("/api/users/:id/password", async (c) => {
+    const id = c.req.param("id");
+    if (!db.getUserById(id)) return c.json({ error: "not found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { password?: string };
+    const bad = validatePassword(body.password);
+    if (bad) return c.json({ error: bad }, 400);
+    db.setPassword(id, await hashPassword(String(body.password)));
+    db.deleteSessionsForUser(id);
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/users/:id", (c) => {
+    const id = c.req.param("id");
+    if (id === c.get("user").id) return c.json({ error: "You cannot delete yourself." }, 400);
+    if (!db.getUserById(id)) return c.json({ error: "not found" }, 404);
+    if (provider instanceof SimpleFinProvider) provider.disconnect(id);
+    db.deleteUser(id);
+    return c.json({ ok: true });
   });
 
   /* ---- Financial data ---- */

@@ -4,10 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Account, MerchantInsight, Transaction } from "@ezfin/core";
 
+export type Role = "admin" | "member";
+
 export interface User {
   id: string;
   username: string;
   email: string;
+  role: Role;
   createdAt: string;
 }
 
@@ -15,9 +18,18 @@ export interface Db {
   raw: DatabaseSync;
   /* ---- users and sessions ---- */
   countUsers(): number;
-  createUser(u: { username: string; email: string; passwordHash: string }): User;
+  listUsers(): (User & { accounts: number; lastSeenAt: string | null })[];
+  createUser(u: { username: string; email: string; passwordHash: string; role: Role }): User;
   getUserByUsername(username: string): (User & { passwordHash: string }) | undefined;
-  getUserById(id: string): User | undefined;
+  getUserById(id: string): (User & { passwordHash: string }) | undefined;
+  updateUser(
+    id: string,
+    patch: { username?: string; email?: string; role?: Role },
+  ): User | undefined;
+  setPassword(id: string, passwordHash: string): void;
+  /** Removes the user, their sessions, and all their financial data. */
+  deleteUser(id: string): void;
+  deleteSessionsForUser(userId: string, exceptTokenHash?: string): void;
   createSession(userId: string, tokenHash: string, expiresAt: string): void;
   getSessionUser(tokenHash: string): User | undefined;
   deleteSession(tokenHash: string): void;
@@ -63,6 +75,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE COLLATE NOCASE,
   email TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -121,12 +134,14 @@ type UserRow = {
   username: string;
   email: string;
   password_hash: string;
+  role: string;
   created_at: string;
 };
 const toUser = (r: UserRow): User => ({
   id: r.id,
   username: r.username,
   email: r.email,
+  role: r.role === "admin" ? "admin" : "member",
   createdAt: r.created_at,
 });
 
@@ -192,6 +207,16 @@ export function openDb(file: string): Db {
     if (!cols.includes("user_id")) raw.exec("DROP TABLE accounts; DROP TABLE transactions;");
   }
   raw.exec(SCHEMA);
+  const userCols = (raw.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map(
+    (c) => c.name,
+  );
+  if (!userCols.includes("role")) {
+    raw.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+    // The person who set the install up becomes its administrator.
+    raw.exec(
+      "UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users ORDER BY created_at LIMIT 1)",
+    );
+  }
   if (file !== ":memory:") {
     // Keep the data file private to the current OS user.
     try {
@@ -226,20 +251,63 @@ export function openDb(file: string): Db {
     countUsers() {
       return (raw.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
     },
+    listUsers() {
+      const rows = raw
+        .prepare(`
+        SELECT u.*, (SELECT COUNT(*) FROM accounts a WHERE a.user_id = u.id) AS accounts,
+               (SELECT MAX(created_at) FROM sessions s WHERE s.user_id = u.id) AS last_seen
+        FROM users u ORDER BY u.created_at`)
+        .all() as (UserRow & { accounts: number; last_seen: string | null })[];
+      return rows.map((r) => ({ ...toUser(r), accounts: r.accounts, lastSeenAt: r.last_seen }));
+    },
     createUser(u) {
       const row: UserRow = {
         id: `usr_${randomUUID()}`,
         username: u.username,
         email: u.email,
         password_hash: u.passwordHash,
+        role: u.role,
         created_at: new Date().toISOString(),
       };
       raw
         .prepare(
-          "INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO users (id, username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
-        .run(row.id, row.username, row.email, row.password_hash, row.created_at);
+        .run(row.id, row.username, row.email, row.password_hash, row.role, row.created_at);
       return toUser(row);
+    },
+    updateUser(id, patch) {
+      const r = raw.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+      if (!r) return undefined;
+      raw
+        .prepare("UPDATE users SET username = ?, email = ?, role = ? WHERE id = ?")
+        .run(patch.username ?? r.username, patch.email ?? r.email, patch.role ?? r.role, id);
+      const updated = raw.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow;
+      return toUser(updated);
+    },
+    setPassword(id, passwordHash) {
+      raw.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, id);
+    },
+    deleteUser(id) {
+      raw.exec("BEGIN");
+      try {
+        raw.prepare("DELETE FROM transactions WHERE user_id = ?").run(id);
+        raw.prepare("DELETE FROM accounts WHERE user_id = ?").run(id);
+        raw.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+        raw.prepare("DELETE FROM settings WHERE key LIKE ?").run(`%:${id}`);
+        raw.prepare("DELETE FROM users WHERE id = ?").run(id);
+        raw.exec("COMMIT");
+      } catch (e) {
+        raw.exec("ROLLBACK");
+        throw e;
+      }
+    },
+    deleteSessionsForUser(userId, exceptTokenHash) {
+      if (exceptTokenHash)
+        raw
+          .prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?")
+          .run(userId, exceptTokenHash);
+      else raw.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
     },
     getUserByUsername(username) {
       const r = raw.prepare("SELECT * FROM users WHERE username = ?").get(username) as
@@ -249,7 +317,7 @@ export function openDb(file: string): Db {
     },
     getUserById(id) {
       const r = raw.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
-      return r ? toUser(r) : undefined;
+      return r ? { ...toUser(r), passwordHash: r.password_hash } : undefined;
     },
     createSession(userId, tokenHash, expiresAt) {
       raw

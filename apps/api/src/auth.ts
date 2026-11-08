@@ -78,6 +78,11 @@ export function endSession(c: Context, db: Db): void {
   deleteCookie(c, SESSION_COOKIE, { path: "/" });
 }
 
+export function currentTokenHash(c: Context): string | undefined {
+  const token = getCookie(c, SESSION_COOKIE);
+  return token ? hashToken(token) : undefined;
+}
+
 export function currentUser(c: Context, db: Db): User | undefined {
   const token = getCookie(c, SESSION_COOKIE);
   return token ? db.getSessionUser(hashToken(token)) : undefined;
@@ -91,6 +96,43 @@ export function requireUser(db: Db): MiddlewareHandler<{ Variables: { user: User
     c.set("user", user);
     await next();
   };
+}
+
+/** Admin-only routes. Must run after requireUser. */
+export function requireAdmin(): MiddlewareHandler<{ Variables: { user: User } }> {
+  return async (c, next) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "admin only" }, 403);
+    await next();
+  };
+}
+
+/** Partial validation for profile edits: only the supplied fields are checked. */
+export function validateProfile(input: {
+  username?: unknown;
+  email?: unknown;
+}): { ok: true; username?: string; email?: string } | { ok: false; error: string } {
+  const out: { username?: string; email?: string } = {};
+  if (input.username !== undefined) {
+    const username = String(input.username).trim();
+    if (!/^[a-z0-9_.-]{3,32}$/i.test(username))
+      return {
+        ok: false,
+        error: "Username must be 3 to 32 characters: letters, numbers, dot, dash or underscore.",
+      };
+    out.username = username;
+  }
+  if (input.email !== undefined) {
+    const email = String(input.email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
+      return { ok: false, error: "Enter a valid email address." };
+    out.email = email;
+  }
+  return { ok: true, ...out };
+}
+
+export function validatePassword(password: unknown): string | undefined {
+  const p = String(password ?? "");
+  return p.length < 10 || p.length > 256 ? "Password must be at least 10 characters." : undefined;
 }
 
 /** Tiny fixed-window limiter: after 10 failures in 15 minutes, logins wait. */

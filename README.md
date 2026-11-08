@@ -67,7 +67,8 @@ ezfin has its own tiny account system, built on Node's standard library with no 
 
 - First run shows a one-time setup form. The account you create owns every financial account you connect afterwards.
 - Passwords are hashed with scrypt and a random salt. Sessions are random tokens in an httpOnly, SameSite=Strict cookie; only a SHA-256 of the token is stored.
-- Every financial route is scoped to the signed-in user. More people can be added from Settings, and each gets their own bank link, accounts and transactions. Merchant knowledge (rules the model or you taught it) is shared across people on the install.
+- Every financial route is scoped to the signed-in user. The person who runs setup is the administrator; they can add more people from Settings, and each gets their own bank link, accounts and transactions. Merchant knowledge (rules the model or you taught it) is shared across people on the install.
+- Settings follow the usual two-group layout. **Account** (Profile, Security, Data source, Privacy) is about you. **Administration** (Users, Local AI, Server) is only shown to administrators and covers the server itself: user management with roles, password resets and deletion, the local model, and runtime information.
 - There is no password reset by design. Forget it and you delete the data folder and start over.
 
 If you later want OAuth, passkeys or email flows, Better Auth is the library to reach for; it supports Hono and SQLite. For a local-only app the standard-library version above is smaller and has no network surface.
@@ -154,7 +155,7 @@ apps/
     providers/        mock, simplefin
     ai/               local-model classifier (Ollama or OpenAI-compatible) and background job
   web/src/
-    pages/            overview, transactions, categories, recurring, settings
+    pages/            overview, transactions, categories, recurring, settings/ (one file per section)
     components/       layout, stat, category-badge, ui/ (shadcn)
     lib/              api client, formatting, query hook
 packages/core/src/    types, categories, merchant, categorize, recurring, summary, synthetic

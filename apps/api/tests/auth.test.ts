@@ -86,7 +86,7 @@ describe("accounts and sessions", () => {
 
   it("keeps two users' financial accounts apart", async () => {
     const { app, headers, json, db } = await makeApp();
-    const created = await app.request("/api/auth/users", {
+    const created = await app.request("/api/users", {
       method: "POST",
       headers: json,
       body: JSON.stringify({

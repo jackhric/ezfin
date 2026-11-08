@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import { Layout } from "@/components/layout";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthPage } from "@/pages/auth";
@@ -8,7 +8,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { CategoriesPage } from "@/pages/categories";
 import { OverviewPage } from "@/pages/overview";
 import { RecurringPage } from "@/pages/recurring";
-import { SettingsPage } from "@/pages/settings";
+import { AiSettings } from "@/pages/settings/ai";
+import { DataSourceSettings } from "@/pages/settings/data-source";
+import { AdminOnly, SettingsLayout } from "@/pages/settings/layout";
+import { PrivacySettings } from "@/pages/settings/privacy";
+import { ProfileSettings } from "@/pages/settings/profile";
+import { SecuritySettings } from "@/pages/settings/security";
+import { ServerSettings } from "@/pages/settings/server";
+import { UsersSettings } from "@/pages/settings/users";
 import { TransactionsPage } from "@/pages/transactions";
 import "./index.css";
 
@@ -27,7 +34,41 @@ const router = createBrowserRouter([
       { path: "transactions", element: <TransactionsPage /> },
       { path: "categories", element: <CategoriesPage /> },
       { path: "recurring", element: <RecurringPage /> },
-      { path: "settings", element: <SettingsPage /> },
+      {
+        path: "settings",
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to="/settings/profile" replace /> },
+          { path: "profile", element: <ProfileSettings /> },
+          { path: "security", element: <SecuritySettings /> },
+          { path: "data-source", element: <DataSourceSettings /> },
+          { path: "privacy", element: <PrivacySettings /> },
+          {
+            path: "users",
+            element: (
+              <AdminOnly>
+                <UsersSettings />
+              </AdminOnly>
+            ),
+          },
+          {
+            path: "ai",
+            element: (
+              <AdminOnly>
+                <AiSettings />
+              </AdminOnly>
+            ),
+          },
+          {
+            path: "server",
+            element: (
+              <AdminOnly>
+                <ServerSettings />
+              </AdminOnly>
+            ),
+          },
+        ],
+      },
     ],
   },
 ]);

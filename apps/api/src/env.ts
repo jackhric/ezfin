@@ -31,6 +31,9 @@ export const env = {
   allowNonLocalBind: process.env.EZFIN_ALLOW_NONLOCAL_BIND === "1",
 };
 
+export const VERSION = "0.1.0";
+export const STARTED_AT = new Date().toISOString();
+
 export function dbPath(): string {
   return path.join(env.dataDir, env.provider === "mock" ? "ezfin-demo.db" : "ezfin.db");
 }

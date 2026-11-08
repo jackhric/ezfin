@@ -72,7 +72,26 @@ export interface Me {
   id: string;
   username: string;
   email: string;
+  role: "admin" | "member";
   createdAt: string;
+}
+
+export interface ManagedUser extends Me {
+  accounts: number;
+  lastSeenAt: string | null;
+}
+
+export interface ServerInfo {
+  version: string;
+  node: string;
+  startedAt: string;
+  bind: string;
+  dataDir: string;
+  database: { path: string; bytes: number };
+  provider: "mock" | "simplefin";
+  ai: { provider: string; url: string; model: string };
+  container: boolean;
+  users: number;
 }
 
 export const api = {
@@ -82,9 +101,30 @@ export const api = {
   login: (body: { username: string; password: string }) =>
     request<{ user: Me }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
-  addUser: (body: { username: string; email: string; password: string }) =>
-    request<{ user: Me }>("/api/auth/users", { method: "POST", body: JSON.stringify(body) }),
   me: () => request<{ user: Me; accounts: Account[]; netWorth: Summary["netWorth"] }>("/api/me"),
+  updateMe: (body: { username?: string; email?: string }) =>
+    request<{ user: Me }>("/api/me", { method: "PATCH", body: JSON.stringify(body) }),
+  changePassword: (body: { current: string; next: string }) =>
+    request<{ ok: true }>("/api/me/password", { method: "POST", body: JSON.stringify(body) }),
+  signOutElsewhere: () => request<{ ok: true }>("/api/me/sessions", { method: "DELETE" }),
+  serverInfo: () => request<ServerInfo>("/api/server/info"),
+  users: () => request<{ users: ManagedUser[] }>("/api/users"),
+  createUser: (body: {
+    username: string;
+    email: string;
+    password: string;
+    role: "admin" | "member";
+  }) => request<{ user: Me }>("/api/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (
+    id: string,
+    body: { username?: string; email?: string; role?: "admin" | "member" },
+  ) => request<{ user: Me }>(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  resetUserPassword: (id: string, password: string) =>
+    request<{ ok: true }>(`/api/users/${id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+  deleteUser: (id: string) => request<{ ok: true }>(`/api/users/${id}`, { method: "DELETE" }),
   aiStatus: () => request<AiStatus>("/api/ai/status"),
   aiCategorize: (scope: "uncategorized" | "all") =>
     request<{ started: boolean }>("/api/ai/categorize", {
