@@ -104,7 +104,7 @@ export function ScheduleSettings() {
         <Input
           value={times}
           onChange={(e) => setTimes(e.target.value)}
-          placeholder="05:00, 17:00"
+          placeholder="05:23, 17:35"
         />
       </Field>
       <Field

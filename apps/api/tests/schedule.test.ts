@@ -136,7 +136,7 @@ describe("scheduler", () => {
 
     // Admin API: read, update, run now.
     const got = await (await app.request("/api/server/sync-schedule", { headers: json })).json();
-    expect(got.config).toEqual({ enabled: true, times: ["05:00", "17:00"] });
+    expect(got.config).toEqual({ enabled: true, times: ["05:23", "17:35"] });
     const put = await app.request("/api/server/sync-schedule", {
       method: "PUT",
       headers: json,

@@ -2,7 +2,7 @@ import type { Db } from "./db.ts";
 import { syncUser, type SyncDeps } from "./sync.ts";
 
 /**
- * Syncs every user's links at fixed local times of day (default 05:00 and 17:00).
+ * Syncs every user's links at fixed local times of day (default 05:23 and 17:35).
  *
  * Deliberately simple: a timer wakes every 30 seconds and fires when the wall
  * clock matches a configured slot that has not fired today. The last fired slot
@@ -25,7 +25,7 @@ export interface ScheduleRun {
   errors: { linkId: string; error: string }[];
 }
 
-export const DEFAULT_SCHEDULE: ScheduleConfig = { enabled: true, times: ["05:00", "17:00"] };
+export const DEFAULT_SCHEDULE: ScheduleConfig = { enabled: true, times: ["05:23", "17:35"] };
 const KEY_CONFIG = "sync.schedule";
 const KEY_LAST_SLOT = "sync.schedule.lastSlot";
 const KEY_LAST_RUN = "sync.schedule.lastRun";
