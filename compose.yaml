@@ -5,6 +5,8 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      # Scheduled syncs (default 05:00 and 17:00) use this time zone.
+      TZ: America/New_York
       # Ollama running on the host machine. Keep Ollama bound to localhost on the host.
       EZFIN_AI_URL: http://host.docker.internal:11434
     extra_hosts:

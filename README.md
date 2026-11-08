@@ -84,6 +84,13 @@ ezfin ships a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggregation
 3. In ezfin, open Settings > Data source, press **Link SimpleFIN**, paste the token. The token is SimpleFIN's own one-time handshake (a base64-encoded claim URL); ezfin exchanges it immediately for a per-link credential file and you never see it again. All accounts are imported on the spot, with about 13 months of history.
 4. Press **Sync** on the link (or the global Sync button) whenever you want fresh data. **Unlink** removes the credential and everything imported through it.
 
+### Scheduled sync and the request budget
+
+SimpleFIN refreshes from banks about once a day and expects clients to make 24 or fewer requests per day per access token. ezfin handles both:
+
+- A built-in scheduler syncs every person's links twice a day, at **05:00 and 17:00** server time by default. Administrators change the times, switch it off, or press **Run now** under Settings > Server. In Docker, set `TZ` in `compose.yaml` so "05:00" means your 05:00.
+- Every request to the bridge is logged per link. A link may make at most **16** requests in a rolling 24 hours (admin-adjustable, capped at 24). A sync that would exceed the budget is refused before any request is sent, with a message saying how many remain. A first import costs about 5 requests (90-day windows over 13 months); each later sync costs 1. Each link card shows its usage.
+
 You can have several links (two bridge accounts, or demo data alongside a real bank). Account and transaction ids are namespaced per link, so nothing collides.
 
 The adapter is hand-written against the public protocol spec (<https://www.simplefin.org/protocol.html>, v2) and the bridge developer guide (<https://beta-bridge.simplefin.org/info/developers>). It sends `version=2`, splits history into 90-day windows as the bridge requires, stays far below the 24-requests-per-day guideline, and shows every message from the bridge's error list on the link.

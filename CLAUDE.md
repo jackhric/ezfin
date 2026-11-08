@@ -32,6 +32,7 @@ release. Add a tool name to select part of the graph. For example, run
 
 # ezfin project notes
 
+- Every outbound provider request must go through `RequestBudget.spend()` so the per-link quota (`provider_requests`) stays accurate. The scheduler lives in `apps/api/src/scheduler.ts`.
 - Bank access is a per-user link (`links` table, `apps/api/src/sync.ts`), never a server-wide setting. Credentials go through `SecretStore`, never into SQLite.
 - Every financial route must be scoped to `c.get("user").id`. A new `Db` method that touches accounts or transactions takes a `userId`.
 - Privacy is the product. Never add network calls from the web app, never log transaction contents, never widen the API bind address, and never commit anything under `apps/api/data`. Read `PRIVACY.md` before touching `apps/api`.

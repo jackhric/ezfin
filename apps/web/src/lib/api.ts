@@ -103,6 +103,25 @@ export interface Link {
   warnings: string[];
   accounts: Account[];
   detail: string;
+  requests: { used: number; limit: number; windowHours: number };
+}
+
+export interface ScheduleStatus {
+  config: { enabled: boolean; times: string[] };
+  running: boolean;
+  nextRunAt: string | null;
+  lastRun: {
+    startedAt: string;
+    finishedAt: string;
+    slot: string;
+    users: number;
+    links: number;
+    transactions: number;
+    errors: { linkId: string; error: string }[];
+  } | null;
+  timezone: string;
+  requestLimit: number;
+  providerCeiling: number;
 }
 
 export interface SyncResult {
@@ -113,6 +132,16 @@ export interface SyncResult {
 }
 
 export const api = {
+  schedule: () => request<ScheduleStatus>("/api/server/sync-schedule"),
+  updateSchedule: (body: { enabled?: boolean; times?: string[]; requestLimit?: number }) =>
+    request<ScheduleStatus>("/api/server/sync-schedule", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  runScheduleNow: () =>
+    request<{ run: NonNullable<ScheduleStatus["lastRun"]> }>("/api/server/sync-schedule/run", {
+      method: "POST",
+    }),
   links: () => request<{ links: Link[] }>("/api/links"),
   linkSimplefin: (setupToken: string, label?: string) =>
     request<{ link: Link; result?: SyncResult }>("/api/links/simplefin", {

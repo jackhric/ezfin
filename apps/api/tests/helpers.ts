@@ -16,6 +16,7 @@ export async function makeApp(extra: Partial<AppDeps> & { noDemo?: boolean } = {
     providers: extra.providers ?? { demo: new MockProvider(3), simplefin: new SimpleFinProvider() },
     secrets,
     ai: extra.ai,
+    scheduler: extra.scheduler,
   });
   const res = await app.request("/api/auth/setup", {
     method: "POST",

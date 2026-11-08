@@ -30,6 +30,11 @@ export interface Db {
   raw: DatabaseSync;
   /* ---- data-source links (one person can have several) ---- */
   listLinks(userId: string): Link[];
+  /** Every link on the install, for the scheduler. */
+  listAllLinks(): Link[];
+  /** Count of outbound provider requests for a link since `sinceISO`. */
+  countRequests(linkId: string, sinceISO: string): number;
+  recordRequest(linkId: string): void;
   getLink(userId: string, id: string): Link | undefined;
   createLink(userId: string, provider: LinkProvider, label: string): Link;
   markLinkSynced(id: string, warnings: string[]): void;
@@ -120,6 +125,11 @@ CREATE TABLE IF NOT EXISTS links (
   last_synced_at TEXT,
   warnings TEXT NOT NULL DEFAULT '[]'
 );
+CREATE TABLE IF NOT EXISTS provider_requests (
+  link_id TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_requests_link ON provider_requests(link_id, at);
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -397,6 +407,27 @@ export function openDb(file: string): Db {
           .all(userId) as LinkRow[]
       ).map(toLink);
     },
+    listAllLinks() {
+      return (raw.prepare("SELECT * FROM links ORDER BY created_at").all() as LinkRow[]).map(
+        toLink,
+      );
+    },
+    countRequests(linkId, sinceISO) {
+      return (
+        raw
+          .prepare("SELECT COUNT(*) AS n FROM provider_requests WHERE link_id = ? AND at >= ?")
+          .get(linkId, sinceISO) as { n: number }
+      ).n;
+    },
+    recordRequest(linkId) {
+      raw
+        .prepare("INSERT INTO provider_requests (link_id, at) VALUES (?, ?)")
+        .run(linkId, new Date().toISOString());
+      // Keep the log small: nothing older than two days matters.
+      raw
+        .prepare("DELETE FROM provider_requests WHERE at < ?")
+        .run(new Date(Date.now() - 2 * 86_400_000).toISOString());
+    },
     getLink(userId, id) {
       const r = raw.prepare("SELECT * FROM links WHERE user_id = ? AND id = ?").get(userId, id) as
         | LinkRow
@@ -434,6 +465,7 @@ export function openDb(file: string): Db {
           )
           .run(userId, id);
         raw.prepare("DELETE FROM accounts WHERE user_id = ? AND link_id = ?").run(userId, id);
+        raw.prepare("DELETE FROM provider_requests WHERE link_id = ?").run(id);
         raw.prepare("DELETE FROM links WHERE user_id = ? AND id = ?").run(userId, id);
         raw.exec("COMMIT");
       } catch (e) {

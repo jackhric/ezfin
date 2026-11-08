@@ -1,6 +1,6 @@
 import { addDays, categorizeOne, toISODate, type Transaction } from "@ezfin/core";
 import type { Db, Link } from "./db.ts";
-import type { Provider } from "./providers/types.ts";
+import type { Provider, RequestBudget } from "./providers/types.ts";
 import type { SecretStore } from "./secrets.ts";
 
 export interface SyncResult {
@@ -15,6 +15,25 @@ export interface SyncDeps {
   providers: Record<Link["provider"], Provider>;
   secrets: SecretStore;
   minConfidence: number;
+  /** Max outbound requests per link in a rolling 24 hours. SimpleFIN expects 24 or fewer; default 16. */
+  requestLimit?: number;
+}
+
+export const DEFAULT_REQUEST_LIMIT = 16;
+export const BUDGET_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Rolling-24-hour request budget for one link, backed by the provider_requests log. */
+export function budgetFor(db: Db, linkId: string, limit: number): RequestBudget {
+  const since = () => new Date(Date.now() - BUDGET_WINDOW_MS).toISOString();
+  return {
+    limit,
+    get remaining() {
+      return Math.max(0, limit - db.countRequests(linkId, since()));
+    },
+    spend() {
+      db.recordRequest(linkId);
+    },
+  };
 }
 
 /**
@@ -32,7 +51,11 @@ export async function syncLink(db: Db, link: Link, deps: SyncDeps): Promise<Sync
     accounts,
     transactions,
     warnings = [],
-  } = await provider.fetch(since, deps.secrets.get(link.id));
+  } = await provider.fetch(
+    since,
+    deps.secrets.get(link.id),
+    budgetFor(db, link.id, deps.requestLimit ?? DEFAULT_REQUEST_LIMIT),
+  );
   const ns = (id: string) => `${link.id}:${id}`;
   const overrides = db.getOverrides();
   const insights = db.getInsights();

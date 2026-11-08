@@ -7,6 +7,8 @@ import { openDb } from "./db.ts";
 import { dbPath, env } from "./env.ts";
 import { MockProvider, SimpleFinProvider } from "./providers/index.ts";
 import { FileSecretStore } from "./secrets.ts";
+import { SyncScheduler } from "./scheduler.ts";
+import { DEFAULT_REQUEST_LIMIT } from "./sync.ts";
 import { LocalClassifier } from "./ai/classifier.ts";
 import { AiJob } from "./ai/job.ts";
 
@@ -28,7 +30,17 @@ const ai = {
   minConfidence: env.ai.minConfidence,
 };
 
-const app = createApp({ db, providers, secrets, ai });
+const scheduler = new SyncScheduler(db, {
+  providers,
+  secrets,
+  minConfidence: env.ai.minConfidence,
+  get requestLimit() {
+    return Number(db.getSetting("sync.requestLimit") ?? DEFAULT_REQUEST_LIMIT);
+  },
+});
+scheduler.start();
+
+const app = createApp({ db, providers, secrets, ai, scheduler });
 
 // Production mode: serve the built UI from the same process (see `vp run start`).
 const indexFile = path.join(env.staticDir, "index.html");
@@ -59,6 +71,7 @@ serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
 });
 
 const shutdown = () => {
+  scheduler.stop();
   db.close();
   process.exit(0);
 };

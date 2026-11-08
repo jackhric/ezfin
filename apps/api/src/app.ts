@@ -29,7 +29,14 @@ import { STARTED_AT, VERSION, dbPath, env } from "./env.ts";
 import fs from "node:fs";
 import { SimpleFinProvider } from "./providers/simplefin.ts";
 import type { SecretStore } from "./secrets.ts";
-import { syncLink, syncUser, type SyncDeps } from "./sync.ts";
+import {
+  BUDGET_WINDOW_MS,
+  DEFAULT_REQUEST_LIMIT,
+  syncLink,
+  syncUser,
+  type SyncDeps,
+} from "./sync.ts";
+import { readSchedule, validTimes, writeSchedule, type SyncScheduler } from "./scheduler.ts";
 import type { AiJob, AiScope } from "./ai/job.ts";
 import type { Classifier } from "./ai/classifier.ts";
 
@@ -39,6 +46,8 @@ export interface AppDeps {
   secrets: SecretStore;
   /** Optional local-model categorization. Absent when no classifier is configured. */
   ai?: { job: AiJob; classifier: Classifier; minConfidence: number };
+  /** Optional scheduled sync. Absent in tests that do not need it. */
+  scheduler?: SyncScheduler;
 }
 
 type Env = { Variables: { user: User } };
@@ -53,14 +62,27 @@ const strip = <T extends { passwordHash?: string }>(u: T): Omit<T, "passwordHash
  * and every financial route is scoped to the signed-in user. The server only
  * listens on loopback; see PRIVACY.md for the threat model.
  */
-export function createApp({ db, providers, secrets, ai }: AppDeps) {
+export function createApp({ db, providers, secrets, ai, scheduler }: AppDeps) {
   const app = new Hono<Env>();
   const minConfidence = ai?.minConfidence ?? 0.6;
-  const syncDeps: SyncDeps = { providers, secrets, minConfidence };
+  const requestLimit = () => Number(db.getSetting("sync.requestLimit") ?? DEFAULT_REQUEST_LIMIT);
+  const syncDeps: SyncDeps = {
+    providers,
+    secrets,
+    minConfidence,
+    get requestLimit() {
+      return requestLimit();
+    },
+  };
   const linkView = (userId: string) =>
     db.listLinks(userId).map((l) => ({
       ...l,
       accounts: db.listAccounts(userId).filter((a) => a.linkId === l.id),
+      requests: {
+        used: db.countRequests(l.id, new Date(Date.now() - BUDGET_WINDOW_MS).toISOString()),
+        limit: requestLimit(),
+        windowHours: 24,
+      },
       detail:
         l.provider === "simplefin"
           ? `SimpleFIN Bridge at ${SimpleFinProvider.host(secrets.get(l.id) ?? "")}`
@@ -200,6 +222,54 @@ export function createApp({ db, providers, secrets, ai }: AppDeps) {
       container: env.allowNonLocalBind,
       users: db.countUsers(),
     });
+  });
+
+  /* ---- Scheduled sync ---- */
+
+  app.get("/api/server/sync-schedule", (c) =>
+    c.json({
+      ...(scheduler
+        ? scheduler.status()
+        : {
+            config: readSchedule(db),
+            running: false,
+            nextRunAt: null,
+            lastRun: null,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
+      requestLimit: requestLimit(),
+      providerCeiling: 24,
+    }),
+  );
+
+  app.put("/api/server/sync-schedule", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      enabled?: boolean;
+      times?: unknown;
+      requestLimit?: unknown;
+    };
+    const current = readSchedule(db);
+    const times = body.times === undefined ? current.times : validTimes(body.times);
+    if (!times) return c.json({ error: "Times must be 1 to 6 entries like 05:00." }, 400);
+    if (body.requestLimit !== undefined) {
+      const n = Number(body.requestLimit);
+      if (!Number.isInteger(n) || n < 1 || n > 24)
+        return c.json({ error: "Request limit must be a whole number from 1 to 24." }, 400);
+      db.setSetting("sync.requestLimit", String(n));
+    }
+    writeSchedule(db, { enabled: body.enabled ?? current.enabled, times });
+    return c.json({
+      ...(scheduler ? scheduler.status() : { config: readSchedule(db) }),
+      requestLimit: requestLimit(),
+    });
+  });
+
+  /** Sync every link of every user right now. */
+  app.post("/api/server/sync-schedule/run", async (c) => {
+    if (!scheduler) return c.json({ error: "No scheduler in this process" }, 400);
+    if (scheduler.running) return c.json({ error: "A scheduled sync is already running." }, 409);
+    const run = await scheduler.runAll("manual");
+    return c.json({ run });
   });
 
   app.get("/api/users", (c) => c.json({ users: db.listUsers() }));

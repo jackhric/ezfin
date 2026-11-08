@@ -135,6 +135,13 @@ export function DataSourceSettings() {
                 <div className="mt-0.5 text-xs text-muted-foreground">
                   {link.detail}. Linked {relativeTime(link.createdAt)}, last sync{" "}
                   {relativeTime(link.lastSyncedAt)}.
+                  {link.provider === "simplefin" && (
+                    <>
+                      {" "}
+                      {link.requests.used} of {link.requests.limit} bridge requests used in the last{" "}
+                      {link.requests.windowHours} h.
+                    </>
+                  )}
                 </div>
                 {link.warnings.length > 0 && (
                   <ul className="mt-2 list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">

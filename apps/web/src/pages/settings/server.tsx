@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
 import { Field, Section } from "./layout";
+import { ScheduleSettings } from "./schedule";
 
 const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`;
 
@@ -53,6 +54,7 @@ export function ServerSettings() {
         <Field label="Users">
           <div className="text-sm">{i.users}</div>
         </Field>
+        <ScheduleSettings />
       </div>
     </Section>
   );

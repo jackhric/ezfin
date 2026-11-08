@@ -6,7 +6,12 @@ import {
   type Account,
   type Transaction,
 } from "@ezfin/core";
-import type { Provider, ProviderFetch } from "./types.ts";
+import {
+  BudgetExceededError,
+  type Provider,
+  type ProviderFetch,
+  type RequestBudget,
+} from "./types.ts";
 
 /**
  * SimpleFIN Bridge provider.
@@ -62,13 +67,20 @@ export class SimpleFinProvider implements Provider {
   }
 
   /** GET /accounts, split into windows of at most 90 days as the bridge requires. */
-  async fetch(sinceISO: string, accessUrl: string | undefined): Promise<ProviderFetch> {
+  async fetch(
+    sinceISO: string,
+    accessUrl: string | undefined,
+    budget: RequestBudget,
+  ): Promise<ProviderFetch> {
     if (!accessUrl)
       throw new Error("This SimpleFIN link has no credential. Remove it and link again.");
     const { base, auth } = splitAccessUrl(accessUrl);
 
     const today = toISODate(new Date());
     const windows = dateWindows(sinceISO, today, MAX_WINDOW_DAYS);
+    // One HTTP request per window. Refuse up front rather than stop halfway.
+    if (windows.length > budget.remaining)
+      throw new BudgetExceededError(windows.length, budget.remaining, budget.limit);
     const merged: ProviderFetch = { accounts: [], transactions: [], warnings: [] };
     const seenAccounts = new Map<string, Account>();
     const seenTx = new Set<string>();
@@ -81,6 +93,7 @@ export class SimpleFinProvider implements Provider {
       endpoint.searchParams.set("end-date", String(unix(addDays(to, 1))));
       endpoint.searchParams.set("pending", "1");
 
+      budget.spend();
       const res = await fetch(endpoint, { headers: { Authorization: `Basic ${auth}` } });
       if (res.status === 403)
         throw new Error(
