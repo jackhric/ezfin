@@ -1,21 +1,35 @@
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Account, MerchantInsight, Transaction } from "@ezfin/core";
 
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  createdAt: string;
+}
+
 export interface Db {
   raw: DatabaseSync;
-  upsertAccounts(accounts: Account[]): void;
-  upsertTransactions(txs: Transaction[]): void;
-  listAccounts(): Account[];
-  listTransactions(filter?: {
-    from?: string;
-    to?: string;
-    accountId?: string;
-    categoryId?: string;
-    q?: string;
-  }): Transaction[];
-  setCategory(txId: string, categoryId: string): Transaction | undefined;
+  /* ---- users and sessions ---- */
+  countUsers(): number;
+  createUser(u: { username: string; email: string; passwordHash: string }): User;
+  getUserByUsername(username: string): (User & { passwordHash: string }) | undefined;
+  getUserById(id: string): User | undefined;
+  createSession(userId: string, tokenHash: string, expiresAt: string): void;
+  getSessionUser(tokenHash: string): User | undefined;
+  deleteSession(tokenHash: string): void;
+  /* ---- financial data, always scoped to a user ---- */
+  upsertAccounts(userId: string, accounts: Account[]): void;
+  upsertTransactions(userId: string, txs: Transaction[]): void;
+  listAccounts(userId: string): Account[];
+  listTransactions(
+    userId: string,
+    filter?: { from?: string; to?: string; accountId?: string; categoryId?: string; q?: string },
+  ): Transaction[];
+  setCategory(userId: string, txId: string, categoryId: string): Transaction | undefined;
   getOverrides(): Map<string, string>;
   setOverride(merchant: string, categoryId: string): void;
   deleteOverride(merchant: string): void;
@@ -31,7 +45,7 @@ export interface Db {
   getSetting(key: string): string | undefined;
   setSetting(key: string, value: string): void;
   deleteSetting(key: string): void;
-  clearData(): void;
+  clearData(userId: string): void;
   close(): void;
 }
 
@@ -44,6 +58,19 @@ export interface MerchantProfile {
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  email TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS merchant_insights (
   merchant TEXT PRIMARY KEY,
   category_id TEXT NOT NULL,
@@ -54,6 +81,7 @@ CREATE TABLE IF NOT EXISTS merchant_insights (
 );
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
   name TEXT NOT NULL,
   institution TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -64,6 +92,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 CREATE TABLE IF NOT EXISTS transactions (
   id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
   account_id TEXT NOT NULL,
   posted_at TEXT NOT NULL,
   amount REAL NOT NULL,
@@ -74,7 +103,8 @@ CREATE TABLE IF NOT EXISTS transactions (
   /* 1 when the user set the category by hand; auto-recategorization leaves these alone */
   user_categorized INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_tx_posted ON transactions(posted_at);
+CREATE INDEX IF NOT EXISTS idx_tx_posted ON transactions(user_id, posted_at);
+CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_tx_merchant ON transactions(merchant);
 CREATE TABLE IF NOT EXISTS category_overrides (
   merchant TEXT PRIMARY KEY,
@@ -85,6 +115,20 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 `;
+
+type UserRow = {
+  id: string;
+  username: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+};
+const toUser = (r: UserRow): User => ({
+  id: r.id,
+  username: r.username,
+  email: r.email,
+  createdAt: r.created_at,
+});
 
 type AccountRow = {
   id: string;
@@ -136,6 +180,17 @@ export function openDb(file: string): Db {
   }
   const raw = new DatabaseSync(file);
   raw.exec("PRAGMA journal_mode = WAL;");
+  raw.exec("PRAGMA foreign_keys = ON;");
+  // Databases created before accounts had owners cannot be migrated safely: start over.
+  const legacy = raw
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'")
+    .get();
+  if (legacy) {
+    const cols = (raw.prepare("PRAGMA table_info(accounts)").all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    if (!cols.includes("user_id")) raw.exec("DROP TABLE accounts; DROP TABLE transactions;");
+  }
   raw.exec(SCHEMA);
   if (file !== ":memory:") {
     // Keep the data file private to the current OS user.
@@ -147,20 +202,20 @@ export function openDb(file: string): Db {
   }
 
   const upsertAccount = raw.prepare(`
-    INSERT INTO accounts (id, name, institution, type, currency, balance, available_balance, last_synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET name=excluded.name, institution=excluded.institution, type=excluded.type,
+    INSERT INTO accounts (id, user_id, name, institution, type, currency, balance, available_balance, last_synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, name=excluded.name, institution=excluded.institution, type=excluded.type,
       currency=excluded.currency, balance=excluded.balance, available_balance=excluded.available_balance,
       last_synced_at=excluded.last_synced_at`);
   const upsertTx = raw.prepare(`
-    INSERT INTO transactions (id, account_id, posted_at, amount, description, merchant, category_id, pending, user_categorized)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-    ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id, posted_at=excluded.posted_at, amount=excluded.amount,
+    INSERT INTO transactions (id, user_id, account_id, posted_at, amount, description, merchant, category_id, pending, user_categorized)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, account_id=excluded.account_id, posted_at=excluded.posted_at, amount=excluded.amount,
       description=excluded.description, merchant=excluded.merchant, pending=excluded.pending,
       category_id = CASE WHEN transactions.user_categorized = 1 THEN transactions.category_id ELSE excluded.category_id END`);
-  const selectTx = raw.prepare("SELECT * FROM transactions WHERE id = ?");
+  const selectTx = raw.prepare("SELECT * FROM transactions WHERE id = ? AND user_id = ?");
   const updateCat = raw.prepare(
-    "UPDATE transactions SET category_id = ?, user_categorized = 1 WHERE id = ?",
+    "UPDATE transactions SET category_id = ?, user_categorized = 1 WHERE id = ? AND user_id = ?",
   );
   const updateAutoCat = raw.prepare(
     "UPDATE transactions SET category_id = ? WHERE id = ? AND user_categorized = 0",
@@ -168,12 +223,60 @@ export function openDb(file: string): Db {
 
   const db: Db = {
     raw,
-    upsertAccounts(accounts) {
+    countUsers() {
+      return (raw.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
+    },
+    createUser(u) {
+      const row: UserRow = {
+        id: `usr_${randomUUID()}`,
+        username: u.username,
+        email: u.email,
+        password_hash: u.passwordHash,
+        created_at: new Date().toISOString(),
+      };
+      raw
+        .prepare(
+          "INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(row.id, row.username, row.email, row.password_hash, row.created_at);
+      return toUser(row);
+    },
+    getUserByUsername(username) {
+      const r = raw.prepare("SELECT * FROM users WHERE username = ?").get(username) as
+        | UserRow
+        | undefined;
+      return r ? { ...toUser(r), passwordHash: r.password_hash } : undefined;
+    },
+    getUserById(id) {
+      const r = raw.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+      return r ? toUser(r) : undefined;
+    },
+    createSession(userId, tokenHash, expiresAt) {
+      raw
+        .prepare(
+          "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(tokenHash, userId, new Date().toISOString(), expiresAt);
+      raw.prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+    },
+    getSessionUser(tokenHash) {
+      const r = raw
+        .prepare(
+          "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?",
+        )
+        .get(tokenHash, new Date().toISOString()) as UserRow | undefined;
+      return r ? toUser(r) : undefined;
+    },
+    deleteSession(tokenHash) {
+      raw.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+    },
+    upsertAccounts(userId, accounts) {
       raw.exec("BEGIN");
       try {
         for (const a of accounts) {
           upsertAccount.run(
             a.id,
+            userId,
             a.name,
             a.institution,
             a.type,
@@ -189,12 +292,13 @@ export function openDb(file: string): Db {
         throw e;
       }
     },
-    upsertTransactions(txs) {
+    upsertTransactions(userId, txs) {
       raw.exec("BEGIN");
       try {
         for (const t of txs) {
           upsertTx.run(
             t.id,
+            userId,
             t.accountId,
             t.postedAt,
             t.amount,
@@ -210,14 +314,16 @@ export function openDb(file: string): Db {
         throw e;
       }
     },
-    listAccounts() {
-      return (raw.prepare("SELECT * FROM accounts ORDER BY type, name").all() as AccountRow[]).map(
-        toAccount,
-      );
+    listAccounts(userId) {
+      return (
+        raw
+          .prepare("SELECT * FROM accounts WHERE user_id = ? ORDER BY type, name")
+          .all(userId) as AccountRow[]
+      ).map(toAccount);
     },
-    listTransactions(filter = {}) {
-      const where: string[] = [];
-      const params: (string | number)[] = [];
+    listTransactions(userId, filter = {}) {
+      const where: string[] = ["t.user_id = ?"];
+      const params: (string | number)[] = [userId];
       if (filter.from) {
         where.push("t.posted_at >= ?");
         params.push(filter.from);
@@ -245,9 +351,9 @@ export function openDb(file: string): Db {
         (r) => ({ ...toTx(r), merchantLabel: r.merchant_label ?? undefined }),
       );
     },
-    setCategory(txId, categoryId) {
-      updateCat.run(categoryId, txId);
-      const row = selectTx.get(txId) as TxRow | undefined;
+    setCategory(userId, txId, categoryId) {
+      updateCat.run(categoryId, txId, userId);
+      const row = selectTx.get(txId, userId) as TxRow | undefined;
       return row ? toTx(row) : undefined;
     },
     getOverrides() {
@@ -372,8 +478,9 @@ export function openDb(file: string): Db {
     deleteSetting(key) {
       raw.prepare("DELETE FROM settings WHERE key = ?").run(key);
     },
-    clearData() {
-      raw.exec("DELETE FROM transactions; DELETE FROM accounts; DELETE FROM merchant_insights;");
+    clearData(userId) {
+      raw.prepare("DELETE FROM transactions WHERE user_id = ?").run(userId);
+      raw.prepare("DELETE FROM accounts WHERE user_id = ?").run(userId);
     },
     close() {
       raw.close();

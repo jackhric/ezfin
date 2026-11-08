@@ -27,7 +27,7 @@ vp install
 vp run dev
 ```
 
-That starts the API on `http://127.0.0.1:8787` and the UI on `http://127.0.0.1:5173`, seeded with synthetic demo data. Or run them separately with `vp run dev:api` and `vp run dev:web`.
+That starts the API on `http://127.0.0.1:8787` and the UI on `http://127.0.0.1:5173`. The first visit asks you to create your account (username, email, password). In demo mode, synthetic data is generated for that account on the spot. Or run them separately with `vp run dev:api` and `vp run dev:web`.
 
 To run it as a single process (the API serves the built UI, no Vite dev server):
 
@@ -61,6 +61,17 @@ docker run --rm -p 127.0.0.1:8787:8787 -v ezfin-data:/data ezfin
 
 Open <http://127.0.0.1:8787>. The database and SimpleFIN credential live in the `ezfin-data` volume. Keep the port published on `127.0.0.1` so nothing else on your network can reach the dashboard. To connect real accounts in the container, set `EZFIN_PROVIDER=simplefin` (there is a commented line in `compose.yaml`) and paste your setup token in Settings.
 
+## Accounts and sign-in
+
+ezfin has its own tiny account system, built on Node's standard library with no auth framework:
+
+- First run shows a one-time setup form. The account you create owns every financial account you connect afterwards.
+- Passwords are hashed with scrypt and a random salt. Sessions are random tokens in an httpOnly, SameSite=Strict cookie; only a SHA-256 of the token is stored.
+- Every financial route is scoped to the signed-in user. More people can be added from Settings, and each gets their own bank link, accounts and transactions. Merchant knowledge (rules the model or you taught it) is shared across people on the install.
+- There is no password reset by design. Forget it and you delete the data folder and start over.
+
+If you later want OAuth, passkeys or email flows, Better Auth is the library to reach for; it supports Hono and SQLite. For a local-only app the standard-library version above is smaller and has no network surface.
+
 ## Connecting real accounts
 
 ezfin ships with a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggregation protocol: you authorize your institutions once at the bridge, it issues a one-time setup token, and the app exchanges that for a read-only access URL. The protocol has no write operations.
@@ -74,7 +85,7 @@ ezfin ships with a **SimpleFIN Bridge** adapter. SimpleFIN is a read-only aggreg
    EZFIN_PROVIDER=simplefin vp run dev:api
    vp run dev:web
    ```
-4. Open Settings in the UI, paste the setup token, press Connect. The first sync pulls about 13 months of history.
+4. Sign in, open Settings, paste the setup token, press Connect. The first sync pulls about 13 months of history. The token is SimpleFIN's own one-time handshake (a base64-encoded claim URL); ezfin exchanges it immediately for a per-user credential file and you never see it again.
 
 The adapter is hand-written against the public protocol spec (<https://www.simplefin.org/protocol.html>, v2) and the bridge developer guide (<https://beta-bridge.simplefin.org/info/developers>). It sends `version=2`, splits history into 90-day windows as the bridge requires, stays far below the 24-requests-per-day guideline, and shows every message from the bridge's error list in Settings.
 
@@ -136,6 +147,7 @@ See [.env.example](./.env.example). The defaults are safe: mock data, loopback o
 apps/
   api/src/
     app.ts            Hono routes
+    auth.ts           scrypt passwords, cookie sessions, login limiter
     server.ts         entry point, loopback bind, serves web/dist when built
     db.ts             node:sqlite schema and queries
     sync.ts           provider -> categorize -> persist

@@ -8,9 +8,9 @@ import type { Account, Transaction } from "@ezfin/core";
 export interface Provider {
   readonly id: "mock" | "simplefin";
   /** Human-readable status for the Settings page. Must never include secrets. */
-  describe(): Promise<ProviderStatus>;
-  /** Fetch everything since `sinceISO` (inclusive). Transactions may arrive uncategorized. */
-  fetch(sinceISO: string): Promise<ProviderFetch>;
+  describe(userId: string): Promise<ProviderStatus>;
+  /** Fetch everything since `sinceISO` (inclusive) for one user. Transactions may arrive uncategorized. */
+  fetch(sinceISO: string, userId: string): Promise<ProviderFetch>;
 }
 
 export interface ProviderFetch {

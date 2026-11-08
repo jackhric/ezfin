@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { Layout } from "@/components/layout";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { AuthPage } from "@/pages/auth";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CategoriesPage } from "@/pages/categories";
 import { OverviewPage } from "@/pages/overview";
@@ -30,10 +32,19 @@ const router = createBrowserRouter([
   },
 ]);
 
+function Gate() {
+  const { loading, user } = useAuth();
+  if (loading) return null;
+  if (!user) return <AuthPage />;
+  return <RouterProvider router={router} />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <TooltipProvider>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <Gate />
+      </AuthProvider>
     </TooltipProvider>
   </StrictMode>,
 );

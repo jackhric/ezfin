@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { MerchantInsight } from "@ezfin/core";
-import { createApp } from "../src/app.ts";
 import { openDb, type MerchantProfile } from "../src/db.ts";
-import { MockProvider } from "../src/providers/mock.ts";
 import {
   assertLocal,
   LocalClassifier,
@@ -11,8 +9,7 @@ import {
 } from "../src/ai/classifier.ts";
 import { AiJob } from "../src/ai/job.ts";
 
-const headers = { host: "127.0.0.1:8787" };
-const json = { ...headers, "content-type": "application/json" };
+import { makeApp } from "./helpers.ts";
 
 describe("classifier guard rails", () => {
   it("refuses non-local endpoints unless explicitly allowed", () => {
@@ -161,7 +158,6 @@ async function waitForJob(job: AiJob) {
 
 describe("ai job", () => {
   it("fills gaps the rules left and shows labels on transactions", async () => {
-    const db = openDb(":memory:");
     const classifier = new FakeClassifier((m) =>
       m.merchant === "steamgames"
         ? {
@@ -172,16 +168,15 @@ describe("ai job", () => {
           }
         : undefined,
     );
-    const job = new AiJob(db, classifier, { batchSize: 5, minConfidence: 0.6 });
-    const app = createApp({
-      db,
-      provider: new MockProvider(3),
+    const pre = openDb(":memory:");
+    const job = new AiJob(pre, classifier, { batchSize: 5, minConfidence: 0.6 });
+    const { app, db, headers, json, userId } = await makeApp({
+      db: pre,
       ai: { job, classifier, minConfidence: 0.6 },
     });
-    await app.request("/api/sync", { method: "POST", headers });
 
     // The built-in rules know steamgames; make it unknown by stripping the rule result first.
-    const before = db.listTransactions({ q: "STEAMGAMES" });
+    const before = db.listTransactions(userId, { q: "STEAMGAMES" });
     expect(before.length).toBeGreaterThan(0);
     db.raw.exec(
       "UPDATE transactions SET category_id = 'uncategorized' WHERE merchant = 'steamgames'",
@@ -198,7 +193,7 @@ describe("ai job", () => {
     expect(job.state.classified).toBe(1);
     expect(job.state.recategorized).toBe(before.length);
 
-    const after = db.listTransactions({ q: "STEAMGAMES" });
+    const after = db.listTransactions(userId, { q: "STEAMGAMES" });
     expect(
       after.every(
         (t) => t.categoryId === "entertainment" && t.merchantLabel === "video game store",
@@ -210,25 +205,23 @@ describe("ai job", () => {
 
     // Forgetting insights falls back to the rules (which also say entertainment here) and clears labels.
     await app.request("/api/ai/insights", { method: "DELETE", headers });
-    expect(db.listTransactions({ q: "STEAMGAMES" })[0]!.merchantLabel).toBeUndefined();
+    expect(db.listTransactions(userId, { q: "STEAMGAMES" })[0]!.merchantLabel).toBeUndefined();
   });
 
   it("never overrides a hand-set category and respects the confidence floor", async () => {
-    const db = openDb(":memory:");
     const classifier = new FakeClassifier((m) => ({
       merchant: m.merchant,
       categoryId: "travel",
       label: "wrong",
       confidence: m.merchant === "netflix" ? 0.95 : 0.3,
     }));
-    const job = new AiJob(db, classifier, { batchSize: 50, minConfidence: 0.6 });
-    const app = createApp({
-      db,
-      provider: new MockProvider(3),
+    const pre = openDb(":memory:");
+    const job = new AiJob(pre, classifier, { batchSize: 50, minConfidence: 0.6 });
+    const { app, db, json, userId } = await makeApp({
+      db: pre,
       ai: { job, classifier, minConfidence: 0.6 },
     });
-    await app.request("/api/sync", { method: "POST", headers });
-    const spotify = db.listTransactions({ q: "Spotify" })[0]!;
+    const spotify = db.listTransactions(userId, { q: "Spotify" })[0]!;
     await app.request(`/api/transactions/${spotify.id}/category`, {
       method: "PATCH",
       headers: json,
@@ -243,15 +236,15 @@ describe("ai job", () => {
     await waitForJob(job);
 
     // High-confidence insight wins over rules for netflix in "all" scope.
-    expect(db.listTransactions({ q: "NETFLIX" }).every((t) => t.categoryId === "travel")).toBe(
-      true,
-    );
+    expect(
+      db.listTransactions(userId, { q: "NETFLIX" }).every((t) => t.categoryId === "travel"),
+    ).toBe(true);
     // Low confidence is ignored, rules stay.
     expect(
-      db.listTransactions({ q: "PLANET FITNESS" }).every((t) => t.categoryId === "fitness"),
+      db.listTransactions(userId, { q: "PLANET FITNESS" }).every((t) => t.categoryId === "fitness"),
     ).toBe(true);
     // Hand-set category survives.
-    expect(db.listTransactions({ q: "Spotify" })[0]!.categoryId).toBe("entertainment");
+    expect(db.listTransactions(userId, { q: "Spotify" })[0]!.categoryId).toBe("entertainment");
     // A second start while running is refused; after finishing it is accepted again.
     expect(job.start("uncategorized")).toBe(true);
     await waitForJob(job);

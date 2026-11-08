@@ -17,21 +17,22 @@ export interface SyncResult {
 export async function runSync(
   db: Db,
   provider: Provider,
+  userId: string,
   minConfidence = 0.6,
 ): Promise<SyncResult> {
-  const last = db.getSetting("lastSyncAt");
+  const last = db.getSetting(`lastSyncAt:${userId}`);
   const since = last ? addDays(last.slice(0, 10), -30) : addDays(toISODate(new Date()), -400);
-  const { accounts, transactions, warnings = [] } = await provider.fetch(since);
+  const { accounts, transactions, warnings = [] } = await provider.fetch(since, userId);
   const overrides = db.getOverrides();
   const insights = db.getInsights();
   const categorized: Transaction[] = transactions.map((t) => ({
     ...t,
     categoryId: categorizeOne(t, { overrides, insights, minConfidence }),
   }));
-  db.upsertAccounts(accounts);
-  db.upsertTransactions(categorized);
+  db.upsertAccounts(userId, accounts);
+  db.upsertTransactions(userId, categorized);
   const syncedAt = new Date().toISOString();
-  db.setSetting("lastSyncAt", syncedAt);
-  db.setSetting("lastSyncWarnings", JSON.stringify(warnings));
+  db.setSetting(`lastSyncAt:${userId}`, syncedAt);
+  db.setSetting(`lastSyncWarnings:${userId}`, JSON.stringify(warnings));
   return { accounts: accounts.length, transactions: categorized.length, syncedAt, warnings };
 }

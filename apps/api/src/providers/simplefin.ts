@@ -34,30 +34,32 @@ import type { Provider, ProviderFetch } from "./types.ts";
  */
 export class SimpleFinProvider implements Provider {
   readonly id = "simplefin" as const;
-  private readonly secretFile: string;
 
   constructor(
-    dataDir: string,
+    private readonly dataDir: string,
     private readonly envAccessUrl?: string,
-  ) {
-    this.secretFile = path.join(dataDir, "simplefin.access");
+  ) {}
+
+  /** One credential file per ezfin user, so two people on one install never share a bank link. */
+  private secretFile(userId: string): string {
+    return path.join(this.dataDir, `simplefin-${userId.replace(/[^a-z0-9_-]/gi, "")}.access`);
   }
 
-  hasAccessUrl(): boolean {
-    return Boolean(this.getAccessUrl());
+  hasAccessUrl(userId: string): boolean {
+    return Boolean(this.getAccessUrl(userId));
   }
 
-  private getAccessUrl(): string | undefined {
+  private getAccessUrl(userId: string): string | undefined {
     if (this.envAccessUrl) return this.envAccessUrl;
     try {
-      return fs.readFileSync(this.secretFile, "utf8").trim() || undefined;
+      return fs.readFileSync(this.secretFile(userId), "utf8").trim() || undefined;
     } catch {
       return undefined;
     }
   }
 
   /** POST /claim/:token. Exchange a one-time setup token for an access URL and persist it locally. */
-  async claim(setupToken: string): Promise<void> {
+  async claim(userId: string, setupToken: string): Promise<void> {
     const claimUrl = Buffer.from(setupToken.trim(), "base64").toString("utf8");
     if (!claimUrl.startsWith("https://"))
       throw new Error("Setup token did not decode to an https claim URL");
@@ -72,20 +74,21 @@ export class SimpleFinProvider implements Provider {
     const accessUrl = (await res.text()).trim();
     if (!/^https:\/\/.+@.+/.test(accessUrl))
       throw new Error("Bridge returned an unexpected access URL");
-    fs.mkdirSync(path.dirname(this.secretFile), { recursive: true });
-    fs.writeFileSync(this.secretFile, accessUrl + "\n", { mode: 0o600 });
+    const file = this.secretFile(userId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, accessUrl + "\n", { mode: 0o600 });
   }
 
-  disconnect(): void {
+  disconnect(userId: string): void {
     try {
-      fs.rmSync(this.secretFile);
+      fs.rmSync(this.secretFile(userId));
     } catch {
       /* already gone */
     }
   }
 
-  async describe() {
-    const url = this.getAccessUrl();
+  async describe(userId: string) {
+    const url = this.getAccessUrl(userId);
     if (!url)
       return {
         id: this.id,
@@ -98,13 +101,13 @@ export class SimpleFinProvider implements Provider {
       id: this.id,
       connected: true,
       label: "SimpleFIN",
-      detail: `Connected to ${host}. Access URL stored locally in ${path.basename(this.secretFile)}.`,
+      detail: `Connected to ${host}. Access URL stored locally in ${path.basename(this.secretFile(userId))}.`,
     };
   }
 
   /** GET /accounts, split into windows of at most 90 days as the bridge requires. */
-  async fetch(sinceISO: string): Promise<ProviderFetch> {
-    const accessUrl = this.getAccessUrl();
+  async fetch(sinceISO: string, userId: string): Promise<ProviderFetch> {
+    const accessUrl = this.getAccessUrl(userId);
     if (!accessUrl) throw new Error("SimpleFIN is not connected");
     const { base, auth } = splitAccessUrl(accessUrl);
 

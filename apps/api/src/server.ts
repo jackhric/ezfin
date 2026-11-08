@@ -6,7 +6,6 @@ import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
 import { dbPath, env } from "./env.ts";
 import { MockProvider, SimpleFinProvider, type Provider } from "./providers/index.ts";
-import { runSync } from "./sync.ts";
 import { LocalClassifier } from "./ai/classifier.ts";
 import { AiJob } from "./ai/job.ts";
 
@@ -15,12 +14,6 @@ const provider: Provider =
   env.provider === "simplefin"
     ? new SimpleFinProvider(env.dataDir, env.simplefinAccessUrl)
     : new MockProvider();
-
-// Demo mode: make sure there is something to look at.
-if (env.provider === "mock" && db.listAccounts().length === 0) {
-  const r = await runSync(db, provider, env.ai.minConfidence);
-  console.log(`[ezfin] seeded demo data: ${r.accounts} accounts, ${r.transactions} transactions`);
-}
 
 // Local AI is always wired up; whether a model server is actually running is reported by /api/ai/status.
 const classifier = new LocalClassifier({

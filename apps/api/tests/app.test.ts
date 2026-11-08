@@ -1,27 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
-import { createApp } from "../src/app.ts";
-import { openDb } from "../src/db.ts";
-import { MockProvider } from "../src/providers/mock.ts";
 import { dateWindows, mapResponse } from "../src/providers/simplefin.ts";
-
-const headers = { host: "127.0.0.1:8787" };
-
-async function makeApp() {
-  const db = openDb(":memory:");
-  const app = createApp({ db, provider: new MockProvider(3) });
-  await app.request("/api/sync", { method: "POST", headers });
-  return { app, db };
-}
+import { makeApp } from "./helpers.ts";
 
 describe("api", () => {
   it("refuses non-local hosts", async () => {
     const { app } = await makeApp();
-    const res = await app.request("/api/status", { headers: { host: "evil.example" } });
+    const res = await app.request("/api/auth/status", { headers: { host: "evil.example" } });
     expect(res.status).toBe(403);
   });
 
   it("syncs demo data and serves summaries", async () => {
-    const { app } = await makeApp();
+    const { app, headers } = await makeApp();
     const status = await (await app.request("/api/status", { headers })).json();
     expect(status.accounts).toBe(3);
     expect(status.transactions).toBeGreaterThan(500);
@@ -36,12 +25,12 @@ describe("api", () => {
   });
 
   it("learns merchant rules and survives re-sync", async () => {
-    const { app, db } = await makeApp();
-    const tx = db.listTransactions({ q: "COSTCO WHSE" })[0]!;
+    const { app, db, headers, json, userId } = await makeApp();
+    const tx = db.listTransactions(userId, { q: "COSTCO WHSE" })[0]!;
     expect(tx.categoryId).toBe("groceries");
     const res = await app.request(`/api/transactions/${tx.id}/category`, {
       method: "PATCH",
-      headers: { ...headers, "content-type": "application/json" },
+      headers: json,
       body: JSON.stringify({ categoryId: "shopping", applyToMerchant: true }),
     });
     const body = await res.json();
@@ -50,15 +39,15 @@ describe("api", () => {
     // Re-sync must keep the user's choice.
     await app.request("/api/sync", { method: "POST", headers });
     expect(
-      db.listTransactions({ q: "COSTCO WHSE" }).every((t) => t.categoryId === "shopping"),
+      db.listTransactions(userId, { q: "COSTCO WHSE" }).every((t) => t.categoryId === "shopping"),
     ).toBe(true);
   });
 
   it("rejects simplefin connect in mock mode", async () => {
-    const { app } = await makeApp();
+    const { app, json } = await makeApp();
     const res = await app.request("/api/connect/simplefin", {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json" },
+      headers: json,
       body: JSON.stringify({ setupToken: "abc" }),
     });
     expect(res.status).toBe(400);

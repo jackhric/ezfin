@@ -10,7 +10,17 @@ import {
   addDays,
   toISODate,
 } from "@ezfin/core";
-import type { Db } from "./db.ts";
+import {
+  LoginLimiter,
+  currentUser,
+  endSession,
+  hashPassword,
+  requireUser,
+  startSession,
+  validateCredentials,
+  verifyPassword,
+} from "./auth.ts";
+import type { Db, User } from "./db.ts";
 import type { Provider } from "./providers/types.ts";
 import { SimpleFinProvider } from "./providers/simplefin.ts";
 import { runSync } from "./sync.ts";
@@ -24,14 +34,17 @@ export interface AppDeps {
   ai?: { job: AiJob; classifier: Classifier; minConfidence: number };
 }
 
+type Env = { Variables: { user: User } };
+
 /**
- * The local JSON API. Every route reads from or writes to the local SQLite file.
- * There is no authentication because the server only listens on loopback;
- * see PRIVACY.md for the threat model.
+ * The local JSON API. Every route reads from or writes to the local SQLite file,
+ * and every financial route is scoped to the signed-in user. The server only
+ * listens on loopback; see PRIVACY.md for the threat model.
  */
 export function createApp({ db, provider, ai }: AppDeps) {
-  const app = new Hono();
+  const app = new Hono<Env>();
   const minConfidence = ai?.minConfidence ?? 0.6;
+  const limiter = new LoginLimiter();
   const resolver = () => {
     const overrides = db.getOverrides();
     const insights = db.getInsights();
@@ -51,19 +64,96 @@ export function createApp({ db, provider, ai }: AppDeps) {
     await next();
   });
 
+  /* ---- Accounts (the people kind) ---- */
+
+  /** Who am I, and does this install still need its first account created? */
+  app.get("/api/auth/status", (c) => {
+    const user = currentUser(c, db);
+    return c.json({ setupRequired: db.countUsers() === 0, user: user ?? null });
+  });
+
+  /** One-time setup: creates the first user. Later users are created from Settings by a signed-in user. */
+  app.post("/api/auth/setup", async (c) => {
+    if (db.countUsers() > 0)
+      return c.json({ error: "Setup is already done. Sign in instead." }, 409);
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const v = validateCredentials(body);
+    if (!v.ok) return c.json({ error: v.error }, 400);
+    const user = db.createUser({
+      username: v.username,
+      email: v.email,
+      passwordHash: await hashPassword(v.password),
+    });
+    startSession(c, db, user.id);
+    // Demo mode: give the new user something to look at right away.
+    if (provider.id === "mock") await runSync(db, provider, user.id, minConfidence);
+    return c.json({ user }, 201);
+  });
+
+  app.post("/api/auth/login", async (c) => {
+    if (limiter.blocked())
+      return c.json({ error: "Too many failed attempts. Wait 15 minutes." }, 429);
+    const body = (await c.req.json().catch(() => ({}))) as { username?: string; password?: string };
+    const user = db.getUserByUsername(String(body.username ?? "").trim());
+    const ok = user ? await verifyPassword(String(body.password ?? ""), user.passwordHash) : false;
+    if (!user || !ok) {
+      limiter.fail();
+      await new Promise((r) => setTimeout(r, 300));
+      return c.json({ error: "Wrong username or password." }, 401);
+    }
+    limiter.reset();
+    startSession(c, db, user.id);
+    const { passwordHash: _omit, ...safe } = user;
+    return c.json({ user: safe });
+  });
+
+  app.post("/api/auth/logout", (c) => {
+    endSession(c, db);
+    return c.json({ ok: true });
+  });
+
+  // Everything below requires a session.
+  app.use("/api/*", requireUser(db));
+
+  /** The signed-in user plus the financial accounts that belong to them. */
+  app.get("/api/me", (c) => {
+    const user = c.get("user");
+    const accounts = db.listAccounts(user.id);
+    return c.json({ user, accounts, netWorth: netWorth(accounts) });
+  });
+
+  /** A signed-in user may add another person to this install. */
+  app.post("/api/auth/users", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+    const v = validateCredentials(body);
+    if (!v.ok) return c.json({ error: v.error }, 400);
+    if (db.getUserByUsername(v.username)) return c.json({ error: "That username is taken." }, 409);
+    const user = db.createUser({
+      username: v.username,
+      email: v.email,
+      passwordHash: await hashPassword(v.password),
+    });
+    return c.json({ user }, 201);
+  });
+
+  /* ---- Financial data ---- */
+
   app.get("/api/status", async (c) => {
-    const status = await provider.describe();
+    const user = c.get("user");
+    const status = await provider.describe(user.id);
     return c.json({
       provider: status,
-      lastSyncAt: db.getSetting("lastSyncAt") ?? null,
-      lastSyncWarnings: JSON.parse(db.getSetting("lastSyncWarnings") ?? "[]") as string[],
-      accounts: db.listAccounts().length,
-      transactions: db.listTransactions().length,
+      lastSyncAt: db.getSetting(`lastSyncAt:${user.id}`) ?? null,
+      lastSyncWarnings: JSON.parse(
+        db.getSetting(`lastSyncWarnings:${user.id}`) ?? "[]",
+      ) as string[],
+      accounts: db.listAccounts(user.id).length,
+      transactions: db.listTransactions(user.id).length,
     });
   });
 
   app.get("/api/accounts", (c) => {
-    const accounts = db.listAccounts();
+    const accounts = db.listAccounts(c.get("user").id);
     return c.json({ accounts, netWorth: netWorth(accounts) });
   });
 
@@ -73,7 +163,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
 
   app.get("/api/transactions", (c) => {
     const q = c.req.query();
-    const txs = db.listTransactions({
+    const txs = db.listTransactions(c.get("user").id, {
       from: q.from,
       to: q.to,
       accountId: q.accountId,
@@ -93,7 +183,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
     };
     if (!body.categoryId || !CATEGORY_BY_ID.has(body.categoryId))
       return c.json({ error: "unknown categoryId" }, 400);
-    const tx = db.setCategory(id, body.categoryId);
+    const tx = db.setCategory(c.get("user").id, id, body.categoryId);
     if (!tx) return c.json({ error: "not found" }, 404);
     let recategorized = 0;
     if (body.applyToMerchant) {
@@ -110,12 +200,13 @@ export function createApp({ db, provider, ai }: AppDeps) {
   });
 
   app.get("/api/summary", (c) => {
+    const userId = c.get("user").id;
     const months = Math.max(1, Math.min(36, Number(c.req.query("months") ?? 12)));
     const today = toISODate(new Date());
     const from = `${addDays(today, -31 * (months - 1)).slice(0, 7)}-01`;
-    const txs = db.listTransactions({ from });
+    const txs = db.listTransactions(userId, { from });
     const byMonth = summarizeByMonth(txs);
-    const accounts = db.listAccounts();
+    const accounts = db.listAccounts(userId);
     const currentMonth = today.slice(0, 7);
     const current = byMonth.find((m) => m.month === currentMonth) ?? {
       month: currentMonth,
@@ -134,7 +225,9 @@ export function createApp({ db, provider, ai }: AppDeps) {
   });
 
   app.get("/api/recurring", (c) => {
-    const txs = db.listTransactions({ from: addDays(toISODate(new Date()), -400) });
+    const txs = db.listTransactions(c.get("user").id, {
+      from: addDays(toISODate(new Date()), -400),
+    });
     const series = detectRecurring(txs);
     const active = series.filter((s) => !s.possiblyCancelled);
     return c.json({
@@ -146,7 +239,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
 
   app.post("/api/sync", async (c) => {
     try {
-      const result = await runSync(db, provider, minConfidence);
+      const result = await runSync(db, provider, c.get("user").id, minConfidence);
       // Optionally let the local model fill in whatever the rules could not.
       if (ai && db.getSetting("aiAuto") === "1") ai.job.start("uncategorized");
       return c.json(result);
@@ -155,7 +248,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
     }
   });
 
-  /** Connect SimpleFIN by claiming a setup token. Only available when the API runs with EZFIN_PROVIDER=simplefin. */
+  /** Link SimpleFIN to the signed-in user by claiming a setup token. Needs EZFIN_PROVIDER=simplefin. */
   app.post("/api/connect/simplefin", async (c) => {
     if (!(provider instanceof SimpleFinProvider)) {
       return c.json(
@@ -166,7 +259,7 @@ export function createApp({ db, provider, ai }: AppDeps) {
     const body = (await c.req.json().catch(() => ({}))) as { setupToken?: string };
     if (!body.setupToken) return c.json({ error: "setupToken required" }, 400);
     try {
-      await provider.claim(body.setupToken);
+      await provider.claim(c.get("user").id, body.setupToken);
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "claim failed" }, 502);
@@ -224,11 +317,13 @@ export function createApp({ db, provider, ai }: AppDeps) {
     return c.json({ ok: true, recategorized });
   });
 
+  /** Remove the bank link and every account and transaction belonging to the signed-in user. */
   app.post("/api/disconnect", (c) => {
-    if (provider instanceof SimpleFinProvider) provider.disconnect();
-    db.clearData();
-    db.deleteSetting("lastSyncAt");
-    db.deleteSetting("lastSyncWarnings");
+    const user = c.get("user");
+    if (provider instanceof SimpleFinProvider) provider.disconnect(user.id);
+    db.clearData(user.id);
+    db.deleteSetting(`lastSyncAt:${user.id}`);
+    db.deleteSetting(`lastSyncWarnings:${user.id}`);
     return c.json({ ok: true });
   });
 

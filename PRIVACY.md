@@ -12,6 +12,10 @@ ezfin is built so that the person running it is the only party that ever sees th
 6. **Secrets are not in the repo.** The SimpleFIN access URL is written to `apps/api/data/simplefin.access` (0600). That directory, every `*.db` file, and `.env*` files are gitignored.
 7. **The code was written without access to real data.** Everything in this repository was developed and tested against the synthetic generator in `packages/core/src/synthetic.ts`. Seed 42 produces the demo you see on first run.
 
+## Sign-in
+
+The app has its own accounts so that two people sharing a computer cannot see each other's finances, and so that a browser tab left open does not expose everything forever (sessions expire after 30 days, and sign-out deletes the session server-side). Passwords are hashed with scrypt (N=2^15, r=8, p=1) and a 16-byte random salt. Session cookies are httpOnly and SameSite=Strict; the database stores only a SHA-256 of the token, so a copied database file cannot be replayed as a login. Ten failed logins in 15 minutes pause sign-in. None of this is a substitute for OS-level protection: anyone who can read the data folder can read the data.
+
 ## Running in Docker
 
 Inside a container the process has to bind to the container's interface (`0.0.0.0`), which is why the Dockerfile sets `EZFIN_ALLOW_NONLOCAL_BIND=1`. Isolation then comes from how you publish the port: `compose.yaml` and the README both publish `127.0.0.1:8787:8787`, so only the host machine can reach it. The Host-header check still applies, so a request addressed to your LAN IP is refused even if the port were published more widely. Data and the SimpleFIN credential live in the `ezfin-data` volume, not in the image.

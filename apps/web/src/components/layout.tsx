@@ -2,6 +2,7 @@ import {
   CreditCard,
   LayoutDashboard,
   List,
+  LogOut,
   PieChart,
   RefreshCw,
   Repeat,
@@ -14,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
 import { cn } from "@/lib/utils";
@@ -27,6 +29,7 @@ const NAV = [
 ];
 
 export function Layout() {
+  const { user, logout } = useAuth();
   const status = useQuery(() => api.status());
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string>();
@@ -90,6 +93,17 @@ export function Layout() {
                 {status.data.provider.label}
               </Badge>
               <div>Synced {relativeTime(status.data.lastSyncAt)}</div>
+            </div>
+          )}
+          {user && (
+            <div className="flex items-center justify-between gap-2 border-t pt-2">
+              <div className="min-w-0">
+                <div className="truncate font-medium text-foreground">{user.username}</div>
+                <div className="truncate">{user.email}</div>
+              </div>
+              <Button size="icon-xs" variant="ghost" onClick={logout} title="Sign out">
+                <LogOut className="size-3.5" />
+              </Button>
             </div>
           )}
         </div>

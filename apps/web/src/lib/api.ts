@@ -68,7 +68,23 @@ export interface AiStatus {
   };
 }
 
+export interface Me {
+  id: string;
+  username: string;
+  email: string;
+  createdAt: string;
+}
+
 export const api = {
+  authStatus: () => request<{ setupRequired: boolean; user: Me | null }>("/api/auth/status"),
+  setup: (body: { username: string; email: string; password: string }) =>
+    request<{ user: Me }>("/api/auth/setup", { method: "POST", body: JSON.stringify(body) }),
+  login: (body: { username: string; password: string }) =>
+    request<{ user: Me }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  addUser: (body: { username: string; email: string; password: string }) =>
+    request<{ user: Me }>("/api/auth/users", { method: "POST", body: JSON.stringify(body) }),
+  me: () => request<{ user: Me; accounts: Account[]; netWorth: Summary["netWorth"] }>("/api/me"),
   aiStatus: () => request<AiStatus>("/api/ai/status"),
   aiCategorize: (scope: "uncategorized" | "all") =>
     request<{ started: boolean }>("/api/ai/categorize", {

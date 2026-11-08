@@ -1,6 +1,7 @@
 import { CATEGORY_BY_ID } from "@ezfin/core";
 import { useState } from "react";
 import { CategoryBadge } from "@/components/category-badge";
+import { AddUserCard } from "@/components/add-user-card";
 import { LocalAiCard } from "@/components/local-ai-card";
 import { ErrorBlock, LoadingBlock, PageHeader } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,12 @@ export function SettingsPage() {
   }
 
   async function disconnect() {
-    if (!confirm("Remove the stored access credential and delete all local account data?")) return;
+    if (
+      !confirm(
+        "Remove your bank link and delete your accounts and transactions from this computer?",
+      )
+    )
+      return;
     await api.disconnect();
     status.refetch();
     setMsg("Disconnected and wiped local data.");
@@ -166,6 +172,8 @@ export function SettingsPage() {
         </Card>
 
         <LocalAiCard />
+
+        <AddUserCard />
 
         <Card>
           <CardHeader>
