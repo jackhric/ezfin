@@ -36,11 +36,3 @@ export function normalizeMerchant(description: string): string {
   const words = s.split(" ").filter(Boolean);
   return words.slice(0, 4).join(" ");
 }
-
-/** Human-friendly label from a merchant key. */
-export function displayMerchant(key: string): string {
-  return key
-    .split(" ")
-    .map((w) => (w.length <= 2 ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1)))
-    .join(" ");
-}
