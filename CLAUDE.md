@@ -33,12 +33,15 @@ release. Add a tool name to select part of the graph. For example, run
 # ezfin project notes
 
 - Every outbound provider request must go through `RequestBudget.spend()` so the per-link quota (`provider_requests`) stays accurate. The scheduler lives in `apps/api/src/scheduler.ts`.
-- Bank access is a per-user link (`links` table, `apps/api/src/sync.ts`), never a server-wide setting. Credentials go through `SecretStore`, never into SQLite.
+- Bank access is a per-user link (`links` table in `apps/api/src/db/links.ts`, synced by `apps/api/src/sync.ts`), never a server-wide setting. Credentials go through `SecretStore`, never into SQLite.
 - Every financial route must be scoped to `c.get("user").id`. A new `Db` method that touches accounts or transactions takes a `userId`.
+- API routes live in `apps/api/src/routes/*.ts`, one module per group, each `registerXRoutes(app, ctx)` called from `createApp` in `apps/api/src/app.ts`. The middleware order there (host check, public auth routes, `requireUser`, `requireAdmin`) is the access control; register new routes after it, never before.
+- The `Db` interface and `openDb` facade are in `apps/api/src/db/index.ts`; queries are split into per-table slices beside it (`users`, `links`, `ledger`, `insights`, `settings`), with SQL and migrations in `db/schema.ts`.
 - Privacy is the product. Never add network calls from the web app, never log transaction contents, never widen the API bind address, and never commit anything under `apps/api/data`. Read `PRIVACY.md` before touching `apps/api`.
 - All development happens against synthetic data from `packages/core/src/synthetic.ts`. Do not ask for, paste, or fabricate real financial records.
 - The AI step (`apps/api/src/ai`) may only talk to a loopback model server. Never add a hosted LLM provider. Prompts send merchant keys and descriptions only.
 - `packages/core` must stay dependency-free and pure. New categorization rules go in `categorize.ts` with a test in `packages/core/tests`.
 - UI components come from shadcn (`pnpm dlx shadcn@latest add <name>` inside `apps/web`). Prefer them over hand-rolled widgets.
-- Run `vp check` and `vp run -r test` before committing. `vp run reset` wipes the local database and credentials.
+- Run `vp check` and `vp run -r test` before committing. `vp run reset` (`apps/api/src/reset.ts`) wipes the local database and credentials.
+- Longer documentation lives in `docs/` (`simplefin.md`, `local-ai.md`, `recurring.md`, `development.md`); the README only links to it. Update the layout tree in `docs/development.md` when files move.
 - `vp run start` builds the UI and serves it from the API process. The Dockerfile does the same; keep its COPY list in sync with the workspace layout.
