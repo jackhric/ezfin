@@ -1,4 +1,4 @@
-import type { Db } from "./db.ts";
+import type { Db } from "./db/index.ts";
 import { syncUser, type SyncDeps } from "./sync.ts";
 
 /**

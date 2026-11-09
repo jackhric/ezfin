@@ -1,6 +1,6 @@
 import { expect } from "vite-plus/test";
 import { createApp, type AppDeps } from "../src/app.ts";
-import { openDb } from "../src/db.ts";
+import { openDb } from "../src/db/index.ts";
 import { MockProvider } from "../src/providers/mock.ts";
 import { SimpleFinProvider } from "../src/providers/simplefin.ts";
 import { MemorySecretStore } from "../src/secrets.ts";

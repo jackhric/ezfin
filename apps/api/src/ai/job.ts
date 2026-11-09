@@ -1,5 +1,5 @@
 import { categorizeOne } from "@ezfin/core";
-import type { Db } from "../db.ts";
+import type { Db } from "../db/index.ts";
 import type { Classifier } from "./classifier.ts";
 
 export type AiScope = "uncategorized" | "all";

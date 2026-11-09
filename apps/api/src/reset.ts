@@ -4,7 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { openDb } from "./db.ts";
+import { openDb } from "./db/index.ts";
 import { env } from "./env.ts";
 
 const file = path.join(env.dataDir, "ezfin.db");

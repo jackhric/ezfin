@@ -2,7 +2,7 @@ import { categorizeOne } from "@ezfin/core";
 import type { Hono } from "hono";
 import type { Classifier } from "../ai/classifier.ts";
 import type { AiJob } from "../ai/job.ts";
-import type { Db, User } from "../db.ts";
+import type { Db, User } from "../db/index.ts";
 import { SimpleFinProvider } from "../providers/simplefin.ts";
 import type { SyncScheduler } from "../scheduler.ts";
 import type { SecretStore } from "../secrets.ts";

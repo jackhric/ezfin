@@ -5,7 +5,7 @@ import { BudgetExceededError } from "../src/providers/types.ts";
 import { nextRun, SyncScheduler, validTimes } from "../src/scheduler.ts";
 import { MemorySecretStore } from "../src/secrets.ts";
 import { budgetFor } from "../src/sync.ts";
-import { openDb } from "../src/db.ts";
+import { openDb } from "../src/db/index.ts";
 import { HOST, makeApp, type Json } from "./helpers.ts";
 
 function bridgeResponse() {

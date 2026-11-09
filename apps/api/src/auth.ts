@@ -1,7 +1,7 @@
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import type { Db, User } from "./db.ts";
+import type { Db, User } from "./db/index.ts";
 
 /**
  * Accounts and sessions with nothing but Node's standard library.

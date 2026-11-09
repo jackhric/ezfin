@@ -1,5 +1,5 @@
 import { CATEGORIES, CATEGORY_BY_ID, type MerchantInsight } from "@ezfin/core";
-import type { MerchantProfile } from "../db.ts";
+import type { MerchantProfile } from "../db/index.ts";
 
 /**
  * Talks to a small language model running on this machine and asks it to

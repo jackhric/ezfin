@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { createApp } from "../src/app.ts";
 import { hashPassword, validateCredentials, verifyPassword } from "../src/auth.ts";
-import { openDb } from "../src/db.ts";
+import { openDb } from "../src/db/index.ts";
 import { MockProvider } from "../src/providers/mock.ts";
 import { SimpleFinProvider } from "../src/providers/simplefin.ts";
 import { MemorySecretStore } from "../src/secrets.ts";

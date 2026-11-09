@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { MerchantInsight } from "@ezfin/core";
-import { openDb, type MerchantProfile } from "../src/db.ts";
+import { openDb, type MerchantProfile } from "../src/db/index.ts";
 import {
   assertLocal,
   LocalClassifier,

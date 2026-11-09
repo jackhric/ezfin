@@ -3,7 +3,7 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createApp } from "./app.ts";
-import { openDb } from "./db.ts";
+import { openDb } from "./db/index.ts";
 import { dbPath, env } from "./env.ts";
 import { MockProvider, SimpleFinProvider } from "./providers/index.ts";
 import { FileSecretStore } from "./secrets.ts";

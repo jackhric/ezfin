@@ -1,5 +1,5 @@
 import { addDays, categorizeOne, toISODate, type Transaction } from "@ezfin/core";
-import type { Db, Link } from "./db.ts";
+import type { Db, Link } from "./db/index.ts";
 import type { Provider, RequestBudget } from "./providers/types.ts";
 import type { SecretStore } from "./secrets.ts";
 
