@@ -270,7 +270,7 @@ function AddUserDialog({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={10}
+              minLength={8}
               autoComplete="new-password"
             />
           </div>
@@ -346,7 +346,7 @@ function ResetPasswordDialog({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={10}
+              minLength={8}
               autoComplete="new-password"
             />
           </div>

@@ -45,14 +45,14 @@ export function SecuritySettings() {
             required
           />
         </Field>
-        <Field label="New password" help="At least 10 characters. A few words is best.">
+        <Field label="New password" help="At least 8 characters. A few words is best.">
           <Input
             type="password"
             value={next}
             onChange={(e) => setNext(e.target.value)}
             autoComplete="new-password"
             required
-            minLength={10}
+            minLength={8}
           />
         </Field>
         <Field label="Confirm new password">

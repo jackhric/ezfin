@@ -54,8 +54,8 @@ export function validateCredentials(input: {
     };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
     return { ok: false, error: "Enter a valid email address." };
-  if (password.length < 10 || password.length > 256)
-    return { ok: false, error: "Password must be at least 10 characters." };
+  if (password.length < 8 || password.length > 256)
+    return { ok: false, error: "Password must be at least 8 characters." };
   return { ok: true, username, email, password };
 }
 
@@ -135,7 +135,7 @@ export function validateProfile(input: {
 
 export function validatePassword(password: unknown): string | undefined {
   const p = str(password);
-  return p.length < 10 || p.length > 256 ? "Password must be at least 10 characters." : undefined;
+  return p.length < 8 || p.length > 256 ? "Password must be at least 8 characters." : undefined;
 }
 
 /** Tiny fixed-window limiter: after 10 failures in 15 minutes, logins wait. */

@@ -88,11 +88,11 @@ export function AuthPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={setupRequired ? 10 : undefined}
+                minLength={setupRequired ? 8 : undefined}
               />
               {setupRequired && (
                 <p className="text-xs text-muted-foreground">
-                  At least 10 characters. A few words is best.
+                  At least 8 characters. A few words is best.
                 </p>
               )}
             </div>
