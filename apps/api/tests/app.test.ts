@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { dateWindows, mapResponse } from "../src/providers/simplefin.ts";
-import { makeApp } from "./helpers.ts";
+import { makeApp, type Json } from "./helpers.ts";
 
 describe("api", () => {
   it("refuses non-local hosts", async () => {
@@ -11,15 +11,17 @@ describe("api", () => {
 
   it("syncs demo data and serves summaries", async () => {
     const { app, headers } = await makeApp();
-    const status = await (await app.request("/api/status", { headers })).json();
+    const status = await ((await app.request("/api/status", { headers })).json() as Promise<Json>);
     expect(status.accounts).toBe(3);
     expect(status.transactions).toBeGreaterThan(500);
 
-    const summary = await (await app.request("/api/summary?months=6", { headers })).json();
+    const summary = await ((
+      await app.request("/api/summary?months=6", { headers })
+    ).json() as Promise<Json>);
     expect(summary.months.length).toBeGreaterThan(0);
     expect(summary.netWorth.net).toBeTypeOf("number");
 
-    const rec = await (await app.request("/api/recurring", { headers })).json();
+    const rec = await ((await app.request("/api/recurring", { headers })).json() as Promise<Json>);
     expect(rec.series.map((s: { merchant: string }) => s.merchant)).toContain("netflix");
     expect(rec.monthlyTotal).toBeGreaterThan(0);
   });
@@ -33,7 +35,7 @@ describe("api", () => {
       headers: json,
       body: JSON.stringify({ categoryId: "shopping", applyToMerchant: true }),
     });
-    const body = await res.json();
+    const body = await (res.json() as Promise<Json>);
     expect(body.transaction.categoryId).toBe("shopping");
     expect(body.recategorized).toBeGreaterThan(0);
     // Re-sync must keep the user's choice.
@@ -53,7 +55,7 @@ describe("api", () => {
       }),
     });
     expect(res.status).toBe(502);
-    const links = await (await app.request("/api/links", { headers })).json();
+    const links = await ((await app.request("/api/links", { headers })).json() as Promise<Json>);
     expect(links.links.map((l: { provider: string }) => l.provider)).toEqual(["demo"]);
   });
 });

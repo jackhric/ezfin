@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { makeApp } from "./helpers.ts";
+import { makeApp, type Json } from "./helpers.ts";
 
 /** A fake SimpleFIN bridge: claim returns an access URL, /accounts returns one account. */
 function fakeBridge() {
@@ -58,7 +58,7 @@ describe("data-source links", () => {
         body: JSON.stringify({ setupToken: token }),
       });
       expect(res.status).toBe(201);
-      const { link, result } = await res.json();
+      const { link, result } = await (res.json() as Promise<Json>);
       expect(link.provider).toBe("simplefin");
       expect(link.label).toContain("bridge.example");
       expect(link.accounts).toHaveLength(1);
@@ -71,7 +71,7 @@ describe("data-source links", () => {
         n: 1,
       });
 
-      const me = await (await app.request("/api/me", { headers })).json();
+      const me = await ((await app.request("/api/me", { headers })).json() as Promise<Json>);
       expect(me.accounts[0].id).toBe(`${link.id}:ACT-1`);
       expect(me.accounts[0].linkId).toBe(link.id);
       const txs = db.listTransactions(userId);
@@ -115,9 +115,11 @@ describe("data-source links", () => {
         body: JSON.stringify({ setupToken: token }),
       });
       expect(res.status).toBe(502);
-      const body = await res.json();
+      const body = await (res.json() as Promise<Json>);
       expect(body.error).toMatch(/403/);
-      expect((await (await app.request("/api/links", { headers })).json()).links).toHaveLength(1);
+      expect(
+        (await ((await app.request("/api/links", { headers })).json() as Promise<Json>)).links,
+      ).toHaveLength(1);
       const all = await app.request("/api/sync", { method: "POST", headers });
       expect(all.status).toBe(502);
     } finally {
@@ -130,7 +132,7 @@ describe("data-source links", () => {
     expect((await app.request("/api/links/demo", { method: "POST", headers: json })).status).toBe(
       409,
     );
-    const status = await (await app.request("/api/status", { headers })).json();
+    const status = await ((await app.request("/api/status", { headers })).json() as Promise<Json>);
     expect(status).toMatchObject({ links: 1, demoOnly: true, accounts: 3 });
     expect(status.lastSyncAt).toBeTruthy();
   });

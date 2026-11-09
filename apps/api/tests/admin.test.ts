@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { HOST, makeApp } from "./helpers.ts";
+import { HOST, makeApp, type Json } from "./helpers.ts";
 
 const JSON_HOST = { ...HOST, "content-type": "application/json" };
 
@@ -26,13 +26,13 @@ describe("account settings", () => {
     const { app, headers, json } = await makeApp();
     const other = await loginAs(app, "jack", "correct horse battery");
 
-    const patched = await (
+    const patched = await ((
       await app.request("/api/me", {
         method: "PATCH",
         headers: json,
         body: JSON.stringify({ email: "new@example.com" }),
       })
-    ).json();
+    ).json() as Promise<Json>);
     expect(patched.user.email).toBe("new@example.com");
     expect(patched.user.passwordHash).toBeUndefined();
 
@@ -58,7 +58,9 @@ describe("account settings", () => {
 describe("server administration", () => {
   it("first user is admin and sees server info; members are refused", async () => {
     const { app, headers, json } = await makeApp();
-    const info = await (await app.request("/api/server/info", { headers })).json();
+    const info = await ((
+      await app.request("/api/server/info", { headers })
+    ).json() as Promise<Json>);
     expect(info).toMatchObject({ version: expect.any(String), users: 1 });
 
     const created = await app.request("/api/users", {
@@ -71,7 +73,7 @@ describe("server administration", () => {
       }),
     });
     expect(created.status).toBe(201);
-    expect((await created.json()).user.role).toBe("member");
+    expect((await (created.json() as Promise<Json>)).user.role).toBe("member");
     const sam = await loginAs(app, "sam", "another long pw");
     expect((await app.request("/api/server/info", { headers: sam.headers })).status).toBe(403);
     expect((await app.request("/api/users", { headers: sam.headers })).status).toBe(403);
@@ -98,7 +100,7 @@ describe("server administration", () => {
         password: "another long pw",
       }),
     });
-    const list = await (await app.request("/api/users", { headers })).json();
+    const list = await ((await app.request("/api/users", { headers })).json() as Promise<Json>);
     expect(list.users.map((u: { username: string }) => u.username)).toEqual(["jack", "sam"]);
     const samId = list.users[1].id as string;
 

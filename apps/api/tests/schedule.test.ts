@@ -6,7 +6,7 @@ import { nextRun, SyncScheduler, validTimes } from "../src/scheduler.ts";
 import { MemorySecretStore } from "../src/secrets.ts";
 import { budgetFor } from "../src/sync.ts";
 import { openDb } from "../src/db.ts";
-import { HOST, makeApp } from "./helpers.ts";
+import { HOST, makeApp, type Json } from "./helpers.ts";
 
 function bridgeResponse() {
   return new Response(JSON.stringify({ errlist: [], connections: [], accounts: [] }));
@@ -52,7 +52,7 @@ describe("request budget", () => {
 
   it("exposes usage on the link and lets admins set the limit within SimpleFIN's ceiling", async () => {
     const { app, headers, json } = await makeApp();
-    const links = await (await app.request("/api/links", { headers })).json();
+    const links = await ((await app.request("/api/links", { headers })).json() as Promise<Json>);
     expect(links.links[0].requests).toEqual({ used: 0, limit: 16, windowHours: 24 });
     const bad = await app.request("/api/server/sync-schedule", {
       method: "PUT",
@@ -65,9 +65,10 @@ describe("request budget", () => {
       headers: json,
       body: JSON.stringify({ requestLimit: 10 }),
     });
-    expect((await ok.json()).requestLimit).toBe(10);
+    expect((await (ok.json() as Promise<Json>)).requestLimit).toBe(10);
     expect(
-      (await (await app.request("/api/links", { headers })).json()).links[0].requests.limit,
+      (await ((await app.request("/api/links", { headers })).json() as Promise<Json>)).links[0]
+        .requests.limit,
     ).toBe(10);
   });
 });
@@ -134,18 +135,23 @@ describe("scheduler", () => {
     expect(new Date(status.nextRunAt!).getHours()).toBe(17);
 
     // Admin API: read, update, run now.
-    const got = await (await app.request("/api/server/sync-schedule", { headers: json })).json();
+    const got = await ((
+      await app.request("/api/server/sync-schedule", { headers: json })
+    ).json() as Promise<Json>);
     expect(got.config).toEqual({ enabled: true, times: ["05:23", "17:35"] });
     const put = await app.request("/api/server/sync-schedule", {
       method: "PUT",
       headers: json,
       body: JSON.stringify({ enabled: false, times: ["6:30"] }),
     });
-    expect((await put.json()).config).toEqual({ enabled: false, times: ["06:30"] });
+    expect((await (put.json() as Promise<Json>)).config).toEqual({
+      enabled: false,
+      times: ["06:30"],
+    });
     expect(await scheduler.tick(new Date(2026, 10, 8, 6, 30, 0))).toBe(false);
-    const run = await (
+    const run = await ((
       await app.request("/api/server/sync-schedule/run", { method: "POST", headers: json })
-    ).json();
+    ).json() as Promise<Json>);
     expect(run.run).toMatchObject({ slot: "manual", users: 2, links: 2 });
     // Members cannot touch it.
     expect((await app.request("/api/server/sync-schedule", { headers: sam })).status).toBe(403);

@@ -5,7 +5,7 @@ import { openDb } from "../src/db.ts";
 import { MockProvider } from "../src/providers/mock.ts";
 import { SimpleFinProvider } from "../src/providers/simplefin.ts";
 import { MemorySecretStore } from "../src/secrets.ts";
-import { HOST, makeApp } from "./helpers.ts";
+import { HOST, makeApp, type Json } from "./helpers.ts";
 
 const JSON_HOST = { ...HOST, "content-type": "application/json" };
 
@@ -41,7 +41,9 @@ describe("accounts and sessions", () => {
       providers: { demo: new MockProvider(3), simplefin: new SimpleFinProvider() },
       secrets: new MemorySecretStore(),
     });
-    const status = await (await app.request("/api/auth/status", { headers: HOST })).json();
+    const status = await ((
+      await app.request("/api/auth/status", { headers: HOST })
+    ).json() as Promise<Json>);
     expect(status).toEqual({ setupRequired: true, user: null });
     expect((await app.request("/api/summary", { headers: HOST })).status).toBe(401);
     expect((await app.request("/api/transactions", { headers: HOST })).status).toBe(401);
@@ -49,7 +51,7 @@ describe("accounts and sessions", () => {
 
   it("setup signs in, demo link imports accounts for that user, and refuses a second setup", async () => {
     const { app, headers, userId, db } = await makeApp();
-    const me = await (await app.request("/api/me", { headers })).json();
+    const me = await ((await app.request("/api/me", { headers })).json() as Promise<Json>);
     expect(me.user).toMatchObject({ username: "jack", email: "jack@example.com" });
     expect(me.user.passwordHash).toBeUndefined();
     expect(me.accounts).toHaveLength(3);
@@ -110,10 +112,13 @@ describe("accounts and sessions", () => {
     const sam = { ...HOST, cookie: login.headers.get("set-cookie")!.split(";")[0]! };
 
     // Sam has nothing until they sync; Jack's data is invisible to Sam.
-    expect((await (await app.request("/api/me", { headers: sam })).json()).accounts).toHaveLength(
-      0,
-    );
-    expect((await (await app.request("/api/transactions", { headers: sam })).json()).total).toBe(0);
+    expect(
+      (await ((await app.request("/api/me", { headers: sam })).json() as Promise<Json>)).accounts,
+    ).toHaveLength(0);
+    expect(
+      (await ((await app.request("/api/transactions", { headers: sam })).json() as Promise<Json>))
+        .total,
+    ).toBe(0);
     const jackTx = db.listTransactions(db.getUserByUsername("jack")!.id)[0]!;
     const steal = await app.request(`/api/transactions/${jackTx.id}/category`, {
       method: "PATCH",
@@ -121,6 +126,8 @@ describe("accounts and sessions", () => {
       body: JSON.stringify({ categoryId: "travel" }),
     });
     expect(steal.status).toBe(404);
-    expect((await (await app.request("/api/me", { headers })).json()).accounts).toHaveLength(3);
+    expect(
+      (await ((await app.request("/api/me", { headers })).json() as Promise<Json>)).accounts,
+    ).toHaveLength(3);
   });
 });

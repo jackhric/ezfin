@@ -38,3 +38,7 @@ export async function makeApp(extra: Partial<AppDeps> & { noDemo?: boolean } = {
   }
   return { app, db, headers, json, userId: user.id, secrets };
 }
+
+/** A parsed response body. Tests assert field by field, so the shape stays loose on purpose. */
+// oxlint-disable-next-line typescript/no-explicit-any
+export type Json = Record<string, any>;

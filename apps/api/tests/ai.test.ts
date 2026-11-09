@@ -9,7 +9,7 @@ import {
 } from "../src/ai/classifier.ts";
 import { AiJob } from "../src/ai/job.ts";
 
-import { makeApp } from "./helpers.ts";
+import { makeApp, type Json } from "./helpers.ts";
 
 describe("classifier guard rails", () => {
   it("refuses non-local endpoints unless explicitly allowed", () => {
@@ -200,7 +200,9 @@ describe("ai job", () => {
       ),
     ).toBe(true);
 
-    const status = await (await app.request("/api/ai/status", { headers })).json();
+    const status = await ((
+      await app.request("/api/ai/status", { headers })
+    ).json() as Promise<Json>);
     expect(status).toMatchObject({ configured: true, reachable: true, insights: 1 });
 
     // Forgetting insights falls back to the rules (which also say entertainment here) and clears labels.
