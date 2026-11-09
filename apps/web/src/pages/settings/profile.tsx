@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Field, Section } from "./layout";
+import { Field, Section } from "./_shared";
 
 export function ProfileSettings() {
   const { user, refresh } = useAuth();

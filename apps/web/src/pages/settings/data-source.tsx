@@ -28,7 +28,7 @@ import { api, type Link } from "@/lib/api";
 import { moneyExact, relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
 import { cn } from "@/lib/utils";
-import { Section } from "./layout";
+import { Section } from "./_shared";
 
 const notifySynced = () => window.dispatchEvent(new Event("ezfin:synced"));
 

@@ -49,7 +49,7 @@ import { api, type ManagedUser } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
-import { Section } from "./layout";
+import { Section } from "./_shared";
 
 type Role = "admin" | "member";
 

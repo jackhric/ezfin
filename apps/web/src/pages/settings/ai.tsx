@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { api, type AiStatus } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
-import { Section } from "./layout";
+import { Section } from "./_shared";
 
 /** Settings section for the on-device categorization model. Polls while a job runs. */
 export function AiSettings() {

@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { api, type ScheduleStatus } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
-import { Field } from "./layout";
+import { Field } from "./_shared";
 
 const timeLabel = (iso: string | null) =>
   iso

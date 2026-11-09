@@ -3,7 +3,7 @@ import { CategoryBadge } from "@/components/category-badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useQuery } from "@/lib/use-query";
-import { Field, Section } from "./layout";
+import { Field, Section } from "./_shared";
 
 export function PrivacySettings() {
   const cats = useQuery(() => api.categories());

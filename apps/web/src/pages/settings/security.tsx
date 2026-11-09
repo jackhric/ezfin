@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
-import { Field, Section } from "./layout";
+import { Field, Section } from "./_shared";
 
 export function SecuritySettings() {
   const [current, setCurrent] = useState("");

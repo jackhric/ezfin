@@ -2,7 +2,7 @@ import { ErrorBlock, LoadingBlock } from "@/components/page";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { useQuery } from "@/lib/use-query";
-import { Field, Section } from "./layout";
+import { Field, Section } from "./_shared";
 import { ScheduleSettings } from "./schedule";
 
 const mb = (bytes: number) => `${(bytes / 1_048_576).toFixed(1)} MB`;
