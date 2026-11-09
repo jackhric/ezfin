@@ -42,14 +42,43 @@ export interface Classifier {
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
+/**
+ * Is this host on a network you control? Loopback, RFC 1918 and link-local
+ * IPv4, IPv6 unique-local and link-local, the Tailscale/CGNAT range, and
+ * mDNS-style `.local` / `.internal` / `.lan` / `.home` names all count. Public
+ * internet hosts do not: sending transaction text to a hosted API is the one
+ * thing this app promises never to do by accident, so that still needs
+ * EZFIN_AI_ALLOW_REMOTE=1.
+ */
+export function isPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (LOOPBACK.has(h) || h === "0.0.0.0") return true;
+  if (/\.(local|internal|lan|home|localdomain)$/.test(h) || (!h.includes(".") && !h.includes(":")))
+    return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  if (h.includes(":")) return /^(fc|fd|fe[89ab])/.test(h) || h === "::1";
+  return false;
+}
+
 export function assertLocal(
   url: string,
   cfg: Pick<ClassifierConfig, "allowRemote" | "extraLocalHosts">,
 ): void {
   const host = new URL(url).hostname;
-  if (LOOPBACK.has(host) || cfg.extraLocalHosts?.includes(host) || cfg.allowRemote) return;
+  if (isPrivateHost(host) || cfg.extraLocalHosts?.includes(host) || cfg.allowRemote) return;
   throw new Error(
-    `Refusing to send transaction data to ${host}: the AI endpoint must be on this machine. Set EZFIN_AI_ALLOW_REMOTE=1 only if you really mean it.`,
+    `Refusing to send transaction data to ${host}: it is a public internet address, not a machine on your network. Set EZFIN_AI_ALLOW_REMOTE=1 only if you really mean it.`,
   );
 }
 

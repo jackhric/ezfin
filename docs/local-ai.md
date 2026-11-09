@@ -26,7 +26,7 @@ The code lives in `apps/api/src/ai/`: `classifier.ts` talks to the model server 
 
 ## Privacy enforcement
 
-The API refuses any AI endpoint whose hostname is not loopback (or `host.docker.internal` inside the container); see `assertLocal` in `apps/api/src/ai/classifier.ts`. To point at something else you must set `EZFIN_AI_ALLOW_REMOTE=1` deliberately. There is no hosted-provider option and none should be added.
+The API accepts any AI endpoint on a private network (loopback, LAN ranges such as 10.x, 172.16-31.x and 192.168.x, link-local, Tailscale's 100.64-127.x, IPv6 unique-local, and `.local`-style names). It refuses public internet hosts, so a mistyped URL can never send merchant text to a hosted API; `EZFIN_AI_ALLOW_REMOTE=1` lifts even that, and stays environment-only. See `assertLocal` and `isPrivateHost` in `apps/api/src/ai/classifier.ts`.
 
 ## Other servers and models
 
@@ -36,7 +36,7 @@ All `EZFIN_AI_*` variables are listed in [.env.example](../.env.example).
 
 ## Configuring and testing from the UI
 
-Administrators can change the provider, server URL, model, confidence floor and batch size under Settings, Local AI, without restarting. Environment variables only supply the defaults. Every change passes the same loopback guard as the environment path, so a URL on another machine is refused unless `EZFIN_AI_ALLOW_REMOTE=1` was set at startup; that flag is deliberately not editable from the page.
+Administrators can change the provider, server URL, model, confidence floor and batch size under Settings, Local AI, without restarting. Environment variables only supply the defaults. Every change passes the same network guard as the environment path: private addresses are accepted, public internet hosts are refused unless `EZFIN_AI_ALLOW_REMOTE=1` was set at startup; that flag is deliberately not editable from the page.
 
 **Test connection** sends one real request: it checks the server answers, that the model is installed (and lists what is), then classifies a fixed sample merchant and reports the round-trip time and the model's answer. Use it after installing Ollama, after pulling a new model, or when categorization seems stuck.
 
@@ -44,6 +44,6 @@ On the Data source page, each link has a **Test** button. For SimpleFIN it makes
 
 ## Apple Silicon with MLX
 
-`mlx_lm.server` speaks the OpenAI-compatible API, so set the provider to "OpenAI-compatible server" and the URL to `http://127.0.0.1:8080`. That server has no constrained decoding, so ezfin tells the model to answer with bare JSON, strips any `<think>` block, and extracts the first JSON object from whatever comes back. For Qwen3 models it also sends the `/no_think` switch. If you would rather have true schema-constrained output on MLX, LM Studio's headless server (`lms server start`) runs MLX models and supports `response_format`.
+`mlx_lm.server` speaks the OpenAI-compatible API, so set the provider to "OpenAI-compatible server" and the URL to the Mac's address, for example `http://127.0.0.1:8080` on the same machine or `http://10.0.10.66:8080` across the LAN (start the server with `--host 0.0.0.0` for that; it has no authentication, so only on a network you trust). That server has no constrained decoding, so ezfin tells the model to answer with bare JSON, strips any `<think>` block, and extracts the first JSON object from whatever comes back. For Qwen3 models it also sends the `/no_think` switch. If you would rather have true schema-constrained output on MLX, LM Studio's headless server (`lms server start`) runs MLX models and supports `response_format`.
 
 Persistence on macOS is a LaunchAgent; see the main README for a ready-made plist.

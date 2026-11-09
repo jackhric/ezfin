@@ -103,7 +103,7 @@ export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSa
       </Field>
       <Field
         label="Server URL"
-        help="Loopback only (127.0.0.1 or localhost). To use another machine, tunnel its port here with SSH."
+        help="http://127.0.0.1:11434 for a server on this machine, or a private address such as http://10.0.10.66:8080."
       >
         <Input
           value={draft.url}

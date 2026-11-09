@@ -13,9 +13,27 @@ import { AiJob } from "../src/ai/job.ts";
 import { makeApp, type Json } from "./helpers.ts";
 
 describe("classifier guard rails", () => {
-  it("refuses non-local endpoints unless explicitly allowed", () => {
+  it("allows private networks by default and refuses public hosts unless explicitly allowed", () => {
     expect(() => assertLocal("http://127.0.0.1:11434", { allowRemote: false })).not.toThrow();
     expect(() => assertLocal("http://localhost:1234", { allowRemote: false })).not.toThrow();
+    for (const ok of [
+      "http://10.0.10.66:8080",
+      "http://192.168.1.50:11434",
+      "http://172.20.3.4:8080",
+      "http://100.101.102.103:8080",
+      "http://hrichouse-mac.local:8080",
+      "http://macmini:8080",
+      "http://[fd12::1]:8080",
+    ])
+      expect(() => assertLocal(ok, { allowRemote: false }), ok).not.toThrow();
+    for (const bad of [
+      "https://api.openai.com",
+      "http://8.8.8.8:8080",
+      "http://172.32.0.1:8080",
+      "http://example.local.com",
+    ])
+      expect(() => assertLocal(bad, { allowRemote: false }), bad).toThrow(/public internet/);
+    expect(() => assertLocal("https://api.openai.com", { allowRemote: true })).not.toThrow();
     expect(() => assertLocal("https://api.example.com", { allowRemote: false })).toThrow(
       /Refusing/,
     );
@@ -360,10 +378,10 @@ describe("ai configuration and connection test", () => {
       const remote = await app.request("/api/ai/config", {
         method: "PUT",
         headers: json,
-        body: JSON.stringify({ url: "http://192.168.1.50:11434" }),
+        body: JSON.stringify({ url: "https://api.openai.com/v1" }),
       });
       expect(remote.status).toBe(400);
-      expect((await (remote.json() as Promise<Json>)).error).toMatch(/must be on this machine/);
+      expect((await (remote.json() as Promise<Json>)).error).toMatch(/public internet/);
       expect(service.config.url).toBe("http://127.0.0.1:11434");
 
       const bad = await app.request("/api/ai/config", {

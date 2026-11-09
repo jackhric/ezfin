@@ -10,9 +10,10 @@ import {
 /**
  * Runtime-editable local AI configuration. Environment variables give the
  * defaults; administrators can change provider, server URL, model, confidence
- * floor and batch size from Settings. The loopback guard (`assertLocal`) applies
- * to every change, and `allowRemote` stays environment-only on purpose so the
- * web UI can never widen where transaction text is sent.
+ * floor and batch size from Settings. The network guard (`assertLocal`) applies
+ * to every change: machines on your own network are fine, public internet hosts
+ * need EZFIN_AI_ALLOW_REMOTE=1, which stays environment-only on purpose so the
+ * web UI can never route transaction text to a hosted API.
  */
 export interface AiConfig {
   provider: "ollama" | "openai";
