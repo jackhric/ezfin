@@ -9,31 +9,50 @@ import { MockProvider, SimpleFinProvider } from "./providers/index.ts";
 import { FileSecretStore } from "./secrets.ts";
 import { SyncScheduler } from "./scheduler.ts";
 import { DEFAULT_REQUEST_LIMIT } from "./sync.ts";
-import { LocalClassifier } from "./ai/classifier.ts";
 import { AiJob } from "./ai/job.ts";
+import { AiService } from "./ai/service.ts";
 
 const db = openDb(dbPath());
 const providers = { simplefin: new SimpleFinProvider(), demo: new MockProvider() };
 const secrets = new FileSecretStore(env.dataDir);
 
 // Local AI is always wired up; whether a model server is actually running is reported by /api/ai/status.
-const classifier = new LocalClassifier({
-  ...env.ai,
-  extraLocalHosts: env.allowNonLocalBind ? ["host.docker.internal"] : [],
-});
-const ai = {
-  classifier,
-  job: new AiJob(db, classifier, {
-    batchSize: env.ai.batchSize,
+// Env gives the defaults; admins can change provider, URL, model and thresholds from Settings.
+const aiService = new AiService(
+  db,
+  {
+    provider: env.ai.provider,
+    url: env.ai.url,
+    model: env.ai.model,
     minConfidence: env.ai.minConfidence,
-  }),
-  minConfidence: env.ai.minConfidence,
+    batchSize: env.ai.batchSize,
+  },
+  {
+    allowRemote: env.ai.allowRemote,
+    extraLocalHosts: env.allowNonLocalBind ? ["host.docker.internal"] : [],
+  },
+);
+const ai = {
+  service: aiService,
+  job: new AiJob(
+    db,
+    () => aiService.classifier,
+    () => ({ batchSize: aiService.batchSize, minConfidence: aiService.minConfidence }),
+  ),
+  get classifier() {
+    return aiService.classifier;
+  },
+  get minConfidence() {
+    return aiService.minConfidence;
+  },
 };
 
 const scheduler = new SyncScheduler(db, {
   providers,
   secrets,
-  minConfidence: env.ai.minConfidence,
+  get minConfidence() {
+    return aiService.minConfidence;
+  },
   get requestLimit() {
     return Number(db.getSetting("sync.requestLimit") ?? DEFAULT_REQUEST_LIMIT);
   },
@@ -58,7 +77,8 @@ if (fs.existsSync(indexFile)) {
 
 serve({ fetch: app.fetch, hostname: env.host, port: env.port }, (info) => {
   console.log(`[ezfin] api listening on http://${info.address}:${info.port} (data: ${dbPath()})`);
-  console.log(`[ezfin] local AI: ${env.ai.provider} at ${env.ai.url}, model ${env.ai.model}`);
+  const aiCfg = aiService.config;
+  console.log(`[ezfin] local AI: ${aiCfg.provider} at ${aiCfg.url}, model ${aiCfg.model}`);
   if (db.countUsers() === 0)
     console.log("[ezfin] no account yet: open the app to create the first one");
   const sched = scheduler.status();

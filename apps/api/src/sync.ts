@@ -1,5 +1,6 @@
 import { addDays, categorizeOne, toISODate, type Transaction } from "@ezfin/core";
 import type { Db, Link } from "./db/index.ts";
+import type { SimpleFinProvider } from "./providers/simplefin.ts";
 import type { Provider, RequestBudget } from "./providers/types.ts";
 import type { SecretStore } from "./secrets.ts";
 
@@ -12,7 +13,7 @@ export interface SyncResult {
 }
 
 export interface SyncDeps {
-  providers: Record<Link["provider"], Provider>;
+  providers: { simplefin: SimpleFinProvider; demo: Provider };
   secrets: SecretStore;
   minConfidence: number;
   /** Max outbound requests per link in a rolling 24 hours. SimpleFIN expects 24 or fewer; default 16. */

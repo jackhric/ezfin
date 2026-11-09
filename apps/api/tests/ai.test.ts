@@ -252,3 +252,166 @@ describe("ai job", () => {
     await waitForJob(job);
   });
 });
+
+describe("ai configuration and connection test", () => {
+  async function appWithService(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+    vi.stubGlobal("fetch", vi.fn(fetchImpl));
+    const db = openDb(":memory:");
+    const { AiService } = await import("../src/ai/service.ts");
+    const service = new AiService(
+      db,
+      {
+        provider: "ollama",
+        url: "http://127.0.0.1:11434",
+        model: "qwen3:4b",
+        minConfidence: 0.6,
+        batchSize: 12,
+      },
+      { allowRemote: false },
+    );
+    const job = new AiJob(
+      db,
+      () => service.classifier,
+      () => ({ batchSize: service.batchSize, minConfidence: service.minConfidence }),
+    );
+    const ai = {
+      service,
+      job,
+      get classifier() {
+        return service.classifier;
+      },
+      get minConfidence() {
+        return service.minConfidence;
+      },
+    };
+    const made = await makeApp({ db, ai });
+    return { ...made, service };
+  }
+
+  it("lets an admin change settings, refuses non-loopback URLs, and persists", async () => {
+    try {
+      const { app, json, headers, db, service } = await appWithService(
+        async () => new Response("{}"),
+      );
+      const status = await ((
+        await app.request("/api/ai/status", { headers })
+      ).json() as Promise<Json>);
+      expect(status).toMatchObject({ editable: true, batchSize: 12, minConfidence: 0.6 });
+
+      const remote = await app.request("/api/ai/config", {
+        method: "PUT",
+        headers: json,
+        body: JSON.stringify({ url: "http://192.168.1.50:11434" }),
+      });
+      expect(remote.status).toBe(400);
+      expect((await (remote.json() as Promise<Json>)).error).toMatch(/must be on this machine/);
+      expect(service.config.url).toBe("http://127.0.0.1:11434");
+
+      const bad = await app.request("/api/ai/config", {
+        method: "PUT",
+        headers: json,
+        body: JSON.stringify({ minConfidence: 2 }),
+      });
+      expect(bad.status).toBe(400);
+
+      const ok = await app.request("/api/ai/config", {
+        method: "PUT",
+        headers: json,
+        body: JSON.stringify({
+          provider: "openai",
+          url: "http://localhost:1234/",
+          model: "gemma3:4b",
+          minConfidence: 0.75,
+          batchSize: 8,
+        }),
+      });
+      expect(ok.status).toBe(200);
+      expect((await (ok.json() as Promise<Json>)).config).toEqual({
+        provider: "openai",
+        url: "http://localhost:1234",
+        model: "gemma3:4b",
+        minConfidence: 0.75,
+        batchSize: 8,
+      });
+      expect(service.classifier.model).toBe("gemma3:4b");
+      expect(JSON.parse(db.getSetting("ai.config")!)).toMatchObject({ model: "gemma3:4b" });
+      // Status reflects the live values.
+      const after = await ((
+        await app.request("/api/ai/status", { headers })
+      ).json() as Promise<Json>);
+      expect(after).toMatchObject({
+        provider: "openai",
+        model: "gemma3:4b",
+        minConfidence: 0.75,
+        batchSize: 8,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("test endpoint reports offline, model missing, and a timed sample classification", async () => {
+    let mode: "offline" | "missing" | "ok" = "offline";
+    try {
+      const { app, json } = await appWithService(async (url, init) => {
+        if (mode === "offline") throw new Error("ECONNREFUSED");
+        if (String(url).endsWith("/api/tags"))
+          return new Response(
+            JSON.stringify({ models: [{ name: mode === "ok" ? "qwen3:4b" : "other:1b" }] }),
+          );
+        expect(String(url)).toBe("http://127.0.0.1:11434/api/chat");
+        expect(JSON.parse(init?.body as string).messages[1].content).toContain("netflix");
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                results: [
+                  {
+                    merchant: "netflix",
+                    categoryId: "subscriptions",
+                    label: "streaming service",
+                    confidence: 0.97,
+                  },
+                ],
+              }),
+            },
+          }),
+        );
+      });
+      const offline = await app.request("/api/ai/test", { method: "POST", headers: json });
+      expect(offline.status).toBe(502);
+      expect(await (offline.json() as Promise<Json>)).toMatchObject({
+        ok: false,
+        reachable: false,
+      });
+
+      mode = "missing";
+      const missing = await app.request("/api/ai/test", { method: "POST", headers: json });
+      expect(await (missing.json() as Promise<Json>)).toMatchObject({
+        ok: false,
+        reachable: true,
+        modelAvailable: false,
+        models: ["other:1b"],
+      });
+
+      mode = "ok";
+      const good = await app.request("/api/ai/test", { method: "POST", headers: json });
+      expect(good.status).toBe(200);
+      const body = await (good.json() as Promise<Json>);
+      expect(body).toMatchObject({
+        ok: true,
+        reachable: true,
+        modelAvailable: true,
+        sample: {
+          merchant: "netflix",
+          categoryId: "subscriptions",
+          label: "streaming service",
+          confidence: 0.97,
+        },
+      });
+      expect(body.latencyMs).toBeTypeOf("number");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

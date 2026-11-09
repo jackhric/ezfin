@@ -54,6 +54,8 @@ export interface AiStatus {
   models?: string[];
   error?: string;
   minConfidence?: number;
+  batchSize?: number | null;
+  editable?: boolean;
   auto?: boolean;
   insights?: number;
   job?: {
@@ -131,7 +133,56 @@ export interface SyncResult {
   warnings: string[];
 }
 
+export interface AiConfig {
+  provider: "ollama" | "openai";
+  url: string;
+  model: string;
+  minConfidence: number;
+  batchSize: number;
+}
+
+export interface AiTestResult {
+  ok: boolean;
+  reachable: boolean;
+  modelAvailable: boolean;
+  models: string[];
+  url: string;
+  model: string;
+  latencyMs?: number;
+  sample?: { merchant: string; categoryId: string; label: string; confidence: number };
+  error?: string;
+}
+
+export interface LinkTestResult {
+  ok: boolean;
+  provider: "simplefin" | "demo";
+  accounts: number | { id: string; name: string; institution: string }[];
+  warnings?: string[];
+  latencyMs: number;
+  error?: string;
+}
+
 export const api = {
+  aiConfig: () => request<{ config: AiConfig }>("/api/ai/config"),
+  updateAiConfig: (body: Partial<AiConfig>) =>
+    request<{ config: AiConfig }>("/api/ai/config", { method: "PUT", body: JSON.stringify(body) }),
+  aiTest: async () => {
+    // 502 carries a useful body, so do not throw on it.
+    const res = await fetch("/api/ai/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    return (await res.json()) as AiTestResult;
+  },
+  testLink: async (id: string) => {
+    const res = await fetch(`/api/links/${id}/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    const body = (await res.json()) as LinkTestResult & { error?: string };
+    if (res.status === 404) throw new Error(body.error ?? "not found");
+    return body;
+  },
   schedule: () => request<ScheduleStatus>("/api/server/sync-schedule"),
   updateSchedule: (body: { enabled?: boolean; times?: string[]; requestLimit?: number }) =>
     request<ScheduleStatus>("/api/server/sync-schedule", {

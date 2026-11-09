@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { api, type AiStatus } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { Section } from "./_shared";
+import { AiConfigForm } from "./ai-config";
 
 /** Settings section for the on-device categorization model. Polls while a job runs. */
 export function AiSettings() {
@@ -91,7 +92,7 @@ export function AiSettings() {
               <p className="mt-1">
                 Install Ollama from ollama.com, then run{" "}
                 <code className="rounded bg-muted px-1">ollama pull {status.model}</code>. It only
-                needs to be running on this computer. Reload this page afterwards.
+                needs to be running on this computer, then press Test connection below.
               </p>
               {status.error && <p className="mt-1 text-xs">{status.error}</p>}
             </div>
@@ -101,7 +102,7 @@ export function AiSettings() {
               Model <code>{status.model}</code> is not installed. Run{" "}
               <code className="rounded bg-muted px-1">ollama pull {status.model}</code>.
               {status.models && status.models.length > 0 && (
-                <> Installed: {status.models.join(", ")}. Set EZFIN_AI_MODEL to use one of them.</>
+                <> Installed: {status.models.join(", ")}. Pick one in the form below.</>
               )}
             </div>
           )}
@@ -165,6 +166,8 @@ export function AiSettings() {
             everything" lets the model overrule the rules for spending categories. Transfers, card
             payments and income always follow the rules so spending is never double counted.
           </p>
+
+          {status.editable && <AiConfigForm installed={status.models ?? []} onSaved={refresh} />}
         </div>
       )}
     </Section>

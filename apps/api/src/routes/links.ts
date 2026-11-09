@@ -1,12 +1,12 @@
 import { SimpleFinProvider } from "../providers/simplefin.ts";
-import { syncLink } from "../sync.ts";
+import { budgetFor, syncLink } from "../sync.ts";
 import type { Api, RouteContext } from "./context.ts";
 
 /* ---- Data-source links ---- */
 
 export function registerLinksRoutes(
   app: Api,
-  { db, secrets, ai, syncDeps, linkView }: RouteContext,
+  { db, secrets, ai, syncDeps, linkView, providers, requestLimit }: RouteContext,
 ) {
   app.get("/api/links", (c) => c.json({ links: linkView(c.get("user").id) }));
 
@@ -60,6 +60,39 @@ export function registerLinksRoutes(
       return c.json({ result });
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : "sync failed" }, 502);
+    }
+  });
+
+  /** Test a link without importing: one balances-only request for SimpleFIN, a no-op for demo. */
+  app.post("/api/links/:id/test", async (c) => {
+    const user = c.get("user");
+    const link = db.getLink(user.id, c.req.param("id"));
+    if (!link) return c.json({ error: "not found" }, 404);
+    if (link.provider === "demo")
+      return c.json({
+        ok: true,
+        provider: "demo",
+        accounts: linkView(user.id).find((l) => l.id === link.id)?.accounts.length ?? 0,
+        warnings: [],
+        latencyMs: 0,
+      });
+    const started = Date.now();
+    try {
+      const r = await providers.simplefin.probe(
+        secrets.get(link.id),
+        budgetFor(db, link.id, requestLimit()),
+      );
+      return c.json({ ok: true, provider: "simplefin", ...r, latencyMs: Date.now() - started });
+    } catch (e) {
+      return c.json(
+        {
+          ok: false,
+          provider: "simplefin",
+          error: e instanceof Error ? e.message : String(e),
+          latencyMs: Date.now() - started,
+        },
+        502,
+      );
     }
   });
 

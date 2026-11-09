@@ -39,7 +39,7 @@ release. Add a tool name to select part of the graph. For example, run
 - The `Db` interface and `openDb` facade are in `apps/api/src/db/index.ts`; queries are split into per-table slices beside it (`users`, `links`, `ledger`, `insights`, `settings`), with SQL and migrations in `db/schema.ts`.
 - Privacy is the product. Never add network calls from the web app, never log transaction contents, never widen the API bind address, and never commit anything under `apps/api/data`. Read `PRIVACY.md` before touching `apps/api`.
 - All development happens against synthetic data from `packages/core/src/synthetic.ts`. Do not ask for, paste, or fabricate real financial records.
-- The AI step (`apps/api/src/ai`) may only talk to a loopback model server. Never add a hosted LLM provider. Prompts send merchant keys and descriptions only.
+- AI settings are runtime-editable through `AiService` (`apps/api/src/ai/service.ts`); `allowRemote` stays env-only. The AI step (`apps/api/src/ai`) may only talk to a loopback model server. Never add a hosted LLM provider. Prompts send merchant keys and descriptions only.
 - `packages/core` must stay dependency-free and pure. New categorization rules go in `categorize.ts` with a test in `packages/core/tests`.
 - UI components come from shadcn (`pnpm dlx shadcn@latest add <name>` inside `apps/web`). Prefer them over hand-rolled widgets.
 - Run `vp check` and `vp run -r test` before committing. `vp run reset` (`apps/api/src/reset.ts`) wipes the local database and credentials.

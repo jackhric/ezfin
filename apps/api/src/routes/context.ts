@@ -2,6 +2,7 @@ import { categorizeOne } from "@ezfin/core";
 import type { Hono } from "hono";
 import type { Classifier } from "../ai/classifier.ts";
 import type { AiJob } from "../ai/job.ts";
+import type { AiService } from "../ai/service.ts";
 import type { Db, User } from "../db/index.ts";
 import { SimpleFinProvider } from "../providers/simplefin.ts";
 import type { SyncScheduler } from "../scheduler.ts";
@@ -17,14 +18,24 @@ export interface AppDeps {
   providers: SyncDeps["providers"];
   secrets: SecretStore;
   /** Optional local-model categorization. Absent when no classifier is configured. */
-  ai?: { job: AiJob; classifier: Classifier; minConfidence: number };
+  ai?: AiDeps;
   /** Optional scheduled sync. Absent in tests that do not need it. */
   scheduler?: SyncScheduler;
 }
 
 /** Everything a route module needs, built once in `createApp` and shared by every group. */
+/** `classifier` and `minConfidence` are read live so admin changes apply without a restart. */
+export interface AiDeps {
+  job: AiJob;
+  readonly classifier: Classifier;
+  readonly minConfidence: number;
+  /** Present in the real server; lets admins reconfigure and test from the UI. */
+  service?: AiService;
+}
+
 export interface RouteContext extends AppDeps {
-  minConfidence: number;
+  /** Current confidence floor for model insights. A function because it can change at runtime. */
+  minConfidence: () => number;
   /** Per-link outbound request limit, read from settings on every call so admin changes apply at once. */
   requestLimit: () => number;
   syncDeps: SyncDeps;
@@ -48,12 +59,14 @@ export const strip = <T extends { passwordHash?: string }>(u: T): Omit<T, "passw
 
 export function buildContext(deps: AppDeps): RouteContext {
   const { db, providers, secrets, ai } = deps;
-  const minConfidence = ai?.minConfidence ?? 0.6;
+  const minConfidence = () => ai?.minConfidence ?? 0.6;
   const requestLimit = () => Number(db.getSetting("sync.requestLimit") ?? DEFAULT_REQUEST_LIMIT);
   const syncDeps: SyncDeps = {
     providers,
     secrets,
-    minConfidence,
+    get minConfidence() {
+      return minConfidence();
+    },
     get requestLimit() {
       return requestLimit();
     },
@@ -76,7 +89,7 @@ export function buildContext(deps: AppDeps): RouteContext {
     const overrides = db.getOverrides();
     const insights = db.getInsights();
     return (t: Parameters<typeof categorizeOne>[0]) =>
-      categorizeOne(t, { overrides, insights, minConfidence });
+      categorizeOne(t, { overrides, insights, minConfidence: minConfidence() });
   };
   return { ...deps, minConfidence, requestLimit, syncDeps, linkView, resolver };
 }

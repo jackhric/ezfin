@@ -27,11 +27,23 @@ export interface AiJobState {
 export class AiJob {
   state: AiJobState = { running: false, total: 0, done: 0, classified: 0, recategorized: 0 };
 
+  /**
+   * `classifier` and `opts` are read on every use so an admin reconfiguring the
+   * model from Settings takes effect without a restart. Plain values are accepted too.
+   */
   constructor(
     private readonly db: Db,
-    private readonly classifier: Classifier,
-    private readonly opts: { batchSize: number; minConfidence: number },
-  ) {}
+    classifier: Classifier | (() => Classifier),
+    opts:
+      | { batchSize: number; minConfidence: number }
+      | (() => { batchSize: number; minConfidence: number }),
+  ) {
+    this.getClassifier = typeof classifier === "function" ? classifier : () => classifier;
+    this.getOpts = typeof opts === "function" ? opts : () => opts;
+  }
+
+  private readonly getClassifier: () => Classifier;
+  private readonly getOpts: () => { batchSize: number; minConfidence: number };
 
   start(scope: AiScope): boolean {
     if (this.state.running) return false;
@@ -54,11 +66,13 @@ export class AiJob {
   }
 
   private async run(merchants: ReturnType<Db["listMerchants"]>): Promise<void> {
+    const classifier = this.getClassifier();
+    const { batchSize } = this.getOpts();
     try {
-      for (let i = 0; i < merchants.length; i += this.opts.batchSize) {
-        const batch = merchants.slice(i, i + this.opts.batchSize);
-        const insights = await this.classifier.classify(batch);
-        if (insights.length) this.db.upsertInsights(insights, this.classifier.model);
+      for (let i = 0; i < merchants.length; i += batchSize) {
+        const batch = merchants.slice(i, i + batchSize);
+        const insights = await classifier.classify(batch);
+        if (insights.length) this.db.upsertInsights(insights, classifier.model);
         this.state.classified += insights.length;
         this.state.done = Math.min(merchants.length, i + batch.length);
       }
@@ -76,7 +90,7 @@ export class AiJob {
     const overrides = this.db.getOverrides();
     const insights = this.db.getInsights();
     return this.db.recategorize((t) =>
-      categorizeOne(t, { overrides, insights, minConfidence: this.opts.minConfidence }),
+      categorizeOne(t, { overrides, insights, minConfidence: this.getOpts().minConfidence }),
     );
   }
 }

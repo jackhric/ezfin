@@ -66,6 +66,39 @@ export class SimpleFinProvider implements Provider {
     }
   }
 
+  /**
+   * Cheapest possible check that a credential still works: GET /accounts with
+   * balances-only=1 (one request, counted against the budget). Returns what the
+   * bridge exposes without pulling any transactions.
+   */
+  async probe(
+    accessUrl: string | undefined,
+    budget: RequestBudget,
+  ): Promise<{
+    accounts: { id: string; name: string; institution: string }[];
+    warnings: string[];
+  }> {
+    if (!accessUrl)
+      throw new Error("This SimpleFIN link has no credential. Remove it and link again.");
+    if (budget.remaining < 1) throw new BudgetExceededError(1, budget.remaining, budget.limit);
+    const { base, auth } = splitAccessUrl(accessUrl);
+    const endpoint = new URL(`${base}/accounts`);
+    endpoint.searchParams.set("version", "2");
+    endpoint.searchParams.set("balances-only", "1");
+    budget.spend();
+    const res = await fetch(endpoint, { headers: { Authorization: `Basic ${auth}` } });
+    if (res.status === 403)
+      throw new Error(
+        "SimpleFIN refused the request (403): access was revoked or the credentials are wrong.",
+      );
+    if (!res.ok) throw new Error(`SimpleFIN request failed: HTTP ${res.status}`);
+    const page = mapResponse((await res.json()) as SimpleFinResponse);
+    return {
+      accounts: page.accounts.map((a) => ({ id: a.id, name: a.name, institution: a.institution })),
+      warnings: page.warnings ?? [],
+    };
+  }
+
   /** GET /accounts, split into windows of at most 90 days as the bridge requires. */
   async fetch(
     sinceISO: string,

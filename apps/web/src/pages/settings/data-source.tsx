@@ -1,4 +1,4 @@
-import { Database, Landmark, RefreshCw } from "lucide-react";
+import { Database, Landmark, PlugZap, RefreshCw } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ErrorBlock, LoadingBlock } from "@/components/page";
@@ -85,6 +85,28 @@ export function DataSourceSettings() {
     }
   }
 
+  async function testLink(link: Link) {
+    setBusyId(link.id);
+    setMsg(undefined);
+    try {
+      const r = await api.testLink(link.id);
+      if (!r.ok) setMsg(`${link.label}: ${r.error ?? "test failed"}`);
+      else if (r.provider === "demo") setMsg(`${link.label}: demo data, nothing to reach.`);
+      else {
+        const list = Array.isArray(r.accounts) ? r.accounts : [];
+        const warn = r.warnings?.length ? ` Bridge says: ${r.warnings.join("; ")}` : "";
+        setMsg(
+          `${link.label}: bridge answered in ${r.latencyMs} ms with ${list.length} accounts (${[...new Set(list.map((a) => a.institution))].join(", ")}).${warn}`,
+        );
+      }
+      links.refetch();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
   async function unlink(link: Link) {
     await api.unlink(link.id);
     setMsg(`Removed ${link.label} and everything imported through it.`);
@@ -160,6 +182,15 @@ export function DataSourceSettings() {
                 >
                   <RefreshCw className={cn("size-3.5", busyId === link.id && "animate-spin")} />{" "}
                   Sync
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => testLink(link)}
+                  disabled={busyId === link.id}
+                  title="One balances-only request; imports nothing"
+                >
+                  <PlugZap className="size-3.5" /> Test
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setUnlinkTarget(link)}>
                   Unlink

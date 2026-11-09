@@ -137,3 +137,80 @@ describe("data-source links", () => {
     expect(status.lastSyncAt).toBeTruthy();
   });
 });
+
+describe("link test", () => {
+  it("probes SimpleFIN with one balances-only request and counts it", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const u = String(url);
+        calls.push(u);
+        if (u.includes("/claim/"))
+          return new Response("https://user:pass@bridge.example/simplefin");
+        expect(init?.method ?? "GET").toBe("GET");
+        return new Response(
+          JSON.stringify({
+            errlist: [{ code: "con.auth", msg: "Please log in to Example Bank again" }],
+            connections: [{ conn_id: "c1", name: "Example Bank", org_id: "ex", sfin_url: "x" }],
+            accounts: [
+              {
+                id: "A",
+                name: "Checking",
+                conn_id: "c1",
+                currency: "USD",
+                balance: "1.00",
+                "balance-date": 1,
+                transactions: [],
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    try {
+      const { app, json, headers, db } = await makeApp({ noDemo: true });
+      const token = Buffer.from("https://bridge.example/claim/T").toString("base64");
+      const { link } = await ((
+        await app.request("/api/links/simplefin", {
+          method: "POST",
+          headers: json,
+          body: JSON.stringify({ setupToken: token }),
+        })
+      ).json() as Promise<Json>);
+      const before = db.countRequests(link.id, new Date(0).toISOString());
+      calls.length = 0;
+      const res = await app.request(`/api/links/${link.id}/test`, { method: "POST", headers });
+      expect(res.status).toBe(200);
+      const body = await (res.json() as Promise<Json>);
+      expect(body).toMatchObject({
+        ok: true,
+        provider: "simplefin",
+        accounts: [{ name: "Checking", institution: "Example Bank" }],
+        warnings: ["con.auth: Please log in to Example Bank again"],
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain("balances-only=1");
+      expect(db.countRequests(link.id, new Date(0).toISOString())).toBe(before + 1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("demo links test trivially and a missing link is 404", async () => {
+    const { app, headers } = await makeApp();
+    const links = await ((await app.request("/api/links", { headers })).json() as Promise<Json>);
+    const res = await app.request(`/api/links/${links.links[0].id}/test`, {
+      method: "POST",
+      headers,
+    });
+    expect(await (res.json() as Promise<Json>)).toMatchObject({
+      ok: true,
+      provider: "demo",
+      accounts: 3,
+    });
+    expect((await app.request("/api/links/nope/test", { method: "POST", headers })).status).toBe(
+      404,
+    );
+  });
+});
