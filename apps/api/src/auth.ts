@@ -21,6 +21,9 @@ const SESSION_COOKIE = "ezfin_session";
 const SESSION_DAYS = 30;
 const SCRYPT = { N: 2 ** 15, r: 8, p: 1, keylen: 64, maxmem: 128 * 1024 * 1024 };
 
+/** Request bodies are untyped JSON: accept a string field as is and treat anything else as empty. */
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const hash = await scrypt(password.normalize("NFKC"), salt, SCRYPT.keylen);
@@ -41,9 +44,9 @@ export function validateCredentials(input: {
   email?: unknown;
   password?: unknown;
 }): { ok: true; username: string; email: string; password: string } | { ok: false; error: string } {
-  const username = String(input.username ?? "").trim();
-  const email = String(input.email ?? "").trim();
-  const password = String(input.password ?? "");
+  const username = str(input.username).trim();
+  const email = str(input.email).trim();
+  const password = str(input.password);
   if (!/^[a-z0-9_.-]{3,32}$/i.test(username))
     return {
       ok: false,
@@ -113,7 +116,7 @@ export function validateProfile(input: {
 }): { ok: true; username?: string; email?: string } | { ok: false; error: string } {
   const out: { username?: string; email?: string } = {};
   if (input.username !== undefined) {
-    const username = String(input.username).trim();
+    const username = str(input.username).trim();
     if (!/^[a-z0-9_.-]{3,32}$/i.test(username))
       return {
         ok: false,
@@ -122,7 +125,7 @@ export function validateProfile(input: {
     out.username = username;
   }
   if (input.email !== undefined) {
-    const email = String(input.email).trim();
+    const email = str(input.email).trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
       return { ok: false, error: "Enter a valid email address." };
     out.email = email;
@@ -131,7 +134,7 @@ export function validateProfile(input: {
 }
 
 export function validatePassword(password: unknown): string | undefined {
-  const p = String(password ?? "");
+  const p = str(password);
   return p.length < 10 || p.length > 256 ? "Password must be at least 10 characters." : undefined;
 }
 
