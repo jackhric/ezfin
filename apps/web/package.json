@@ -11,9 +11,7 @@
   "dependencies": {
     "@ezfin/core": "workspace:*",
     "@fontsource-variable/geist": "catalog:",
-    "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "cn": "catalog:",
     "lucide-react": "^0.560.0",
     "radix-ui": "catalog:",
@@ -21,8 +19,7 @@
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.9.0",
     "recharts": "catalog:",
-    "shadcn": "catalog:",
-    "tailwind-merge": "^3.3.1"
+    "shadcn": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
