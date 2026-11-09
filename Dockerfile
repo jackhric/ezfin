@@ -10,7 +10,7 @@ FROM node:22-bookworm-slim AS build
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN npm install -g pnpm@12.18.0
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json vite.config.ts ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json vite.config.ts ./
 COPY apps/web/package.json apps/web/
 COPY apps/api/package.json apps/api/
 COPY packages/core/package.json packages/core/
@@ -29,7 +29,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 # Runtime needs the API sources, the core package, the built UI and node_modules
 # (vpx from vite-plus runs the TypeScript sources directly).
-COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/tsconfig.json /app/vite.config.ts ./
+COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/tsconfig.json /app/tsconfig.base.json /app/vite.config.ts ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/apps/web/dist ./apps/web/dist
