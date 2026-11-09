@@ -41,3 +41,9 @@ Administrators can change the provider, server URL, model, confidence floor and 
 **Test connection** sends one real request: it checks the server answers, that the model is installed (and lists what is), then classifies a fixed sample merchant and reports the round-trip time and the model's answer. Use it after installing Ollama, after pulling a new model, or when categorization seems stuck.
 
 On the Data source page, each link has a **Test** button. For SimpleFIN it makes a single balances-only request (counted against the link's budget) and reports the accounts and institutions the bridge exposes plus any bridge messages, without importing anything.
+
+## Apple Silicon with MLX
+
+`mlx_lm.server` speaks the OpenAI-compatible API, so set the provider to "OpenAI-compatible server" and the URL to `http://127.0.0.1:8080`. That server has no constrained decoding, so ezfin tells the model to answer with bare JSON, strips any `<think>` block, and extracts the first JSON object from whatever comes back. For Qwen3 models it also sends the `/no_think` switch. If you would rather have true schema-constrained output on MLX, LM Studio's headless server (`lms server start`) runs MLX models and supports `response_format`.
+
+Persistence on macOS is a LaunchAgent; see the main README for a ready-made plist.

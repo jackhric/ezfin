@@ -86,6 +86,42 @@ export const SYSTEM_PROMPT = [
   "Echo the merchant key exactly as given.",
 ].join("\n");
 
+/**
+ * Servers without constrained decoding (mlx_lm.server, some llama.cpp builds)
+ * may wrap the JSON in prose, code fences or a Qwen3 <think> block. Pull the
+ * first JSON object out of whatever came back.
+ */
+export function extractJson(text: string): unknown {
+  let t = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return JSON.parse(t);
+  } catch {
+    /* fall through to the scan */
+  }
+  const start = t.indexOf("{");
+  if (start === -1) throw new Error("Local model returned something that is not JSON");
+  let depth = 0;
+  for (let i = start; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(t.slice(start, i + 1));
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+  throw new Error("Local model returned something that is not JSON");
+}
+
+/** Qwen3 honors a soft "/no_think" switch in the prompt; harmless for other models but only sent to Qwen3. */
+const isQwen3 = (model: string) => /qwen3/i.test(model);
+
 export function buildUserMessage(batch: MerchantProfile[]): string {
   return JSON.stringify(
     batch.map((m) => ({
@@ -161,8 +197,17 @@ export class LocalClassifier implements Classifier {
 
   async classify(batch: MerchantProfile[]): Promise<MerchantInsight[]> {
     if (batch.length === 0) return [];
+    const noThink = this.cfg.provider === "openai" && isQwen3(this.model) ? " /no_think" : "";
     const messages = [
-      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "system",
+        content:
+          SYSTEM_PROMPT +
+          (this.cfg.provider === "openai"
+            ? '\nAnswer with a single JSON object matching {"results":[{"merchant","categoryId","label","confidence"}]} and nothing else.' +
+              noThink
+            : ""),
+      },
       { role: "user", content: buildUserMessage(batch) },
     ];
     let content: string;
@@ -208,12 +253,6 @@ export class LocalClassifier implements Classifier {
         ((await res.json()) as { choices: { message: { content: string } }[] }).choices[0]?.message
           .content ?? "";
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      throw new Error("Local model returned something that is not JSON");
-    }
-    return parseResults(parsed, batch);
+    return parseResults(extractJson(content), batch);
   }
 }

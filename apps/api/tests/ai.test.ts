@@ -3,6 +3,7 @@ import type { MerchantInsight } from "@ezfin/core";
 import { openDb, type MerchantProfile } from "../src/db/index.ts";
 import {
   assertLocal,
+  extractJson,
   LocalClassifier,
   parseResults,
   type Classifier,
@@ -76,6 +77,64 @@ describe("classifier guard rails", () => {
         confidence: 0.95,
       },
     ]);
+  });
+
+  it("tolerates think blocks, code fences and prose around the JSON", () => {
+    const obj = {
+      results: [{ merchant: "x", categoryId: "dining", label: "cafe", confidence: 0.9 }],
+    };
+    expect(extractJson(JSON.stringify(obj))).toEqual(obj);
+    expect(extractJson(`<think>\nhmm, netflix\n</think>\n${JSON.stringify(obj)}`)).toEqual(obj);
+    expect(extractJson("```json\n" + JSON.stringify(obj) + "\n```")).toEqual(obj);
+    expect(extractJson(`Sure! Here you go: ${JSON.stringify(obj)} Let me know.`)).toEqual(obj);
+    expect(() => extractJson("no json here")).toThrow(/not JSON/);
+  });
+
+  it("asks Qwen3 not to think on OpenAI-compatible servers and parses loose output", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const u = String(url);
+        if (u.endsWith("/v1/models"))
+          return new Response(JSON.stringify({ data: [{ id: "mlx-community/Qwen3-14B-4bit" }] }));
+        expect(u).toBe("http://127.0.0.1:8080/v1/chat/completions");
+        const body = JSON.parse(init?.body as string);
+        expect(body.messages[0].content).toContain("/no_think");
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    '<think>\n\n</think>\n\n```json\n{"results":[{"merchant":"steamgames","categoryId":"entertainment","label":"games","confidence":0.9}]}\n```',
+                },
+              },
+            ],
+          }),
+        );
+      }),
+    );
+    try {
+      const c = new LocalClassifier({
+        provider: "openai",
+        url: "http://127.0.0.1:8080",
+        model: "mlx-community/Qwen3-14B-4bit",
+        allowRemote: false,
+      });
+      expect((await c.status()).modelAvailable).toBe(true);
+      const out = await c.classify([
+        {
+          merchant: "steamgames",
+          samples: ["STEAMGAMES.COM"],
+          typicalAmount: -30,
+          count: 4,
+          categoryId: "uncategorized",
+        },
+      ]);
+      expect(out[0]!.categoryId).toBe("entertainment");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("speaks Ollama's chat format with a JSON schema", async () => {
