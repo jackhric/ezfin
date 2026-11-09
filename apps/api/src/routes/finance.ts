@@ -50,7 +50,14 @@ export function registerFinanceRoutes(app: Api, { db, ai, syncDeps, resolver }: 
       q: q.q,
     });
     const limit = q.limit ? Math.max(1, Math.min(5000, Number(q.limit))) : undefined;
-    return c.json({ transactions: limit ? txs.slice(0, limit) : txs, total: txs.length });
+    const offset = Math.max(0, Number(q.offset ?? 0) || 0);
+    const page = limit ? txs.slice(offset, offset + limit) : txs.slice(offset);
+    return c.json({
+      transactions: page,
+      total: txs.length,
+      offset,
+      hasMore: offset + page.length < txs.length,
+    });
   });
 
   /** Change one transaction's category. With applyToMerchant=true, also learn a rule for that merchant. */

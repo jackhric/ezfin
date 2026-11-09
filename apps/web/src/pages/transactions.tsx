@@ -1,7 +1,8 @@
 import { CATEGORIES, type Transaction } from "@ezfin/core";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CategoryBadge } from "@/components/category-badge";
+import { CategorySelect } from "@/components/category-select";
 import { ErrorBlock, LoadingBlock, PageHeader, useSyncRefresh } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,9 +24,11 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { dateLabel, signed } from "@/lib/format";
+import { useDebounced } from "@/lib/use-debounced";
 import { useQuery } from "@/lib/use-query";
 
 const ALL = "__all__";
+const PAGE = 100;
 
 export function TransactionsPage() {
   const [params, setParams] = useSearchParams();
@@ -33,6 +36,9 @@ export function TransactionsPage() {
   const accountId = params.get("accountId") ?? ALL;
   const month = params.get("month") ?? ALL;
   const [q, setQ] = useState(params.get("q") ?? "");
+  const query = useDebounced(q.trim(), 250);
+  const [extra, setExtra] = useState<Transaction[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [pending, setPending] = useState<{ tx: Transaction; categoryId: string } | undefined>();
   const [notice, setNotice] = useState<string>();
 
@@ -43,18 +49,42 @@ export function TransactionsPage() {
     return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
   }, [month]);
 
-  const txs = useQuery(
-    () =>
-      api.transactions({
-        categoryId: categoryId === ALL ? undefined : categoryId,
-        accountId: accountId === ALL ? undefined : accountId,
-        q: q || undefined,
-        limit: "500",
-        ...range,
-      }),
-    [categoryId, accountId, q, month],
+  const filters = useMemo(
+    () => ({
+      categoryId: categoryId === ALL ? undefined : categoryId,
+      accountId: accountId === ALL ? undefined : accountId,
+      q: query || undefined,
+      ...range,
+    }),
+    [categoryId, accountId, query, range],
   );
+  const txs = useQuery(
+    () => api.transactions({ ...filters, limit: String(PAGE) }),
+    [categoryId, accountId, query, month],
+  );
+  // Pages appended by "Load more" belong to the current filters only.
+  useEffect(() => setExtra([]), [categoryId, accountId, query, month]);
   const accounts = useQuery(() => api.accounts());
+  const accountName = useMemo(
+    () => new Map(accounts.data?.accounts.map((a) => [a.id, a.name]) ?? []),
+    [accounts.data],
+  );
+  const rows = useMemo(() => [...(txs.data?.transactions ?? []), ...extra], [txs.data, extra]);
+  const hasMore = Boolean(txs.data) && rows.length < (txs.data?.total ?? 0);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const page = await api.transactions({
+        ...filters,
+        limit: String(PAGE),
+        offset: String(rows.length),
+      });
+      setExtra((e) => [...e, ...page.transactions]);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
   const summary = useQuery(() => api.summary(13));
   useSyncRefresh(txs.refetch);
 
@@ -70,6 +100,7 @@ export function TransactionsPage() {
     setPending(applyToMerchant ? undefined : { tx: res.transaction, categoryId: next });
     if (applyToMerchant) setNotice(`Rule saved. ${res.recategorized} other transactions updated.`);
     txs.refetch();
+    setExtra((e) => e.map((t) => (t.id === tx.id ? { ...t, categoryId: next } : t)));
   }
 
   const months = summary.data?.months.map((m) => m.month).reverse() ?? [];
@@ -166,7 +197,7 @@ export function TransactionsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {txs.data.transactions.map((t) => (
+              {rows.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell className="text-muted-foreground tabular-nums">
                     {dateLabel(t.postedAt)}
@@ -180,25 +211,15 @@ export function TransactionsPage() {
                       {t.merchantLabel && (
                         <span className="text-foreground/70">{t.merchantLabel} · </span>
                       )}
-                      {accounts.data?.accounts.find((a) => a.id === t.accountId)?.name}
+                      {accountName.get(t.accountId)}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Select value={t.categoryId} onValueChange={(v) => changeCategory(t, v, false)}>
-                      <SelectTrigger
-                        size="sm"
-                        className="w-full border-transparent bg-transparent shadow-none hover:bg-muted"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CATEGORIES.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <CategorySelect
+                      value={t.categoryId}
+                      onChange={(v) => changeCategory(t, v, false)}
+                      ariaLabel={`Category for ${t.description}`}
+                    />
                   </TableCell>
                   <TableCell
                     className={`text-right tabular-nums ${t.amount > 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}
@@ -207,7 +228,7 @@ export function TransactionsPage() {
                   </TableCell>
                 </TableRow>
               ))}
-              {txs.data.transactions.length === 0 && (
+              {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                     No transactions match.
@@ -216,6 +237,18 @@ export function TransactionsPage() {
               )}
             </TableBody>
           </Table>
+          {hasMore && (
+            <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
+              <span>
+                Showing {rows.length} of {txs.data.total}
+              </span>
+              <Button size="sm" variant="outline" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore
+                  ? "Loading"
+                  : `Load ${Math.min(PAGE, txs.data.total - rows.length)} more`}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </>

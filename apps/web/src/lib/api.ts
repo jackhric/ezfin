@@ -265,7 +265,12 @@ export const api = {
     const qs = new URLSearchParams(
       Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])),
     );
-    return request<{ transactions: Transaction[]; total: number }>(`/api/transactions?${qs}`);
+    return request<{
+      transactions: Transaction[];
+      total: number;
+      offset: number;
+      hasMore: boolean;
+    }>(`/api/transactions?${qs}`);
   },
   setCategory: (id: string, categoryId: string, applyToMerchant: boolean) =>
     request<{ transaction: Transaction; recategorized: number }>(
