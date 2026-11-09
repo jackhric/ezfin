@@ -186,6 +186,26 @@ export function parseResults(raw: unknown, batch: MerchantProfile[]): MerchantIn
   return out;
 }
 
+/** Ask a model server what it has loaded. Works for any provider/url, saved or not. */
+export async function listModels(
+  provider: ClassifierConfig["provider"],
+  url: string,
+): Promise<{ reachable: boolean; models: string[]; error?: string }> {
+  const base = url.replace(/\/$/, "");
+  try {
+    const res =
+      provider === "ollama"
+        ? await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(3000) })
+        : await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as { models?: { name: string }[]; data?: { id: string }[] };
+    const models = (body.models ?? body.data ?? []).map((m) => ("name" in m ? m.name : m.id));
+    return { reachable: true, models: [...new Set(models)].sort() };
+  } catch (e) {
+    return { reachable: false, models: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export class LocalClassifier implements Classifier {
   readonly model: string;
   private readonly base: string;
@@ -197,29 +217,21 @@ export class LocalClassifier implements Classifier {
   }
 
   async status(): Promise<ClassifierStatus> {
+    const listed = await listModels(this.cfg.provider, this.base);
     const s: ClassifierStatus = {
       provider: this.cfg.provider,
       url: this.base,
       model: this.model,
-      reachable: false,
+      reachable: listed.reachable,
       modelAvailable: false,
-      models: [],
+      models: listed.models,
+      error: listed.error,
     };
-    try {
-      const res =
-        this.cfg.provider === "ollama"
-          ? await fetch(`${this.base}/api/tags`, { signal: AbortSignal.timeout(3000) })
-          : await fetch(`${this.base}/v1/models`, { signal: AbortSignal.timeout(3000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { models?: { name: string }[]; data?: { id: string }[] };
-      s.models = (body.models ?? body.data ?? []).map((m) => ("name" in m ? m.name : m.id));
-      s.reachable = true;
+    if (s.reachable) {
       s.modelAvailable = s.models.some(
         (m) => m === this.model || m.split(":")[0] === this.model.split(":")[0],
       );
       if (this.cfg.provider === "openai" && s.models.length === 0) s.modelAvailable = true; // some servers do not list
-    } catch (e) {
-      s.error = e instanceof Error ? e.message : String(e);
     }
     return s;
   }

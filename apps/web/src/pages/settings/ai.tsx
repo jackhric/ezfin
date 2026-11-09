@@ -167,7 +167,7 @@ export function AiSettings() {
             payments and income always follow the rules so spending is never double counted.
           </p>
 
-          {status.editable && <AiConfigForm installed={status.models ?? []} onSaved={refresh} />}
+          {status.editable && <AiConfigForm onSaved={refresh} />}
         </div>
       )}
     </Section>

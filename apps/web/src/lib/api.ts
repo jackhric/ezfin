@@ -166,6 +166,14 @@ export const api = {
   aiConfig: () => request<{ config: AiConfig }>("/api/ai/config"),
   updateAiConfig: (body: Partial<AiConfig>) =>
     request<{ config: AiConfig }>("/api/ai/config", { method: "PUT", body: JSON.stringify(body) }),
+  aiModels: (provider: AiConfig["provider"], url: string) =>
+    request<{
+      provider: AiConfig["provider"];
+      url: string;
+      reachable: boolean;
+      models: string[];
+      error?: string;
+    }>(`/api/ai/models?${new URLSearchParams({ provider, url })}`),
   aiTest: async () => {
     // 502 carries a useful body, so do not throw on it.
     const res = await fetch("/api/ai/test", {

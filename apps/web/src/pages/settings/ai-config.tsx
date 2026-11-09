@@ -1,5 +1,5 @@
-import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { CheckCircle2, PlugZap, RefreshCw, XCircle } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CategoryBadge } from "@/components/category-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,18 +11,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, type AiConfig, type AiTestResult } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { Field } from "./_shared";
 
+const OTHER = "__other__";
+
 /**
- * Admin form for the local model server. Every change goes through the API's
- * loopback guard, so a non-local URL is refused with a clear message.
+ * Admin form for the model server. The model dropdown is filled from whatever
+ * server is in the URL field (saved or not), refetched when provider or URL
+ * change. Every save goes through the API's network guard.
  */
-export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSaved: () => void }) {
+export function AiConfigForm({ onSaved }: { onSaved: () => void }) {
   const [cfg, setCfg] = useState<AiConfig>();
   const [draft, setDraft] = useState<AiConfig>();
   const [msg, setMsg] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<AiTestResult | "running">();
+  const [models, setModels] = useState<{
+    list: string[];
+    reachable: boolean;
+    error?: string;
+    loading: boolean;
+  }>({ list: [], reachable: false, loading: false });
+  const [typing, setTyping] = useState(false);
+  const fetchSeq = useRef(0);
 
   useEffect(() => {
     api.aiConfig().then(
@@ -34,9 +46,36 @@ export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSa
     );
   }, []);
 
+  // Refetch the model list whenever the server changes, after a short pause in typing.
+  const provider = draft?.provider;
+  const url = draft?.url;
+  useEffect(() => {
+    if (!provider || !url) return;
+    const seq = ++fetchSeq.current;
+    setModels((m) => ({ ...m, loading: true }));
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.aiModels(provider, url);
+        if (seq !== fetchSeq.current) return;
+        setModels({ list: r.models, reachable: r.reachable, error: r.error, loading: false });
+      } catch (e) {
+        if (seq !== fetchSeq.current) return;
+        setModels({
+          list: [],
+          reachable: false,
+          error: e instanceof Error ? e.message : String(e),
+          loading: false,
+        });
+      }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [provider, url]);
+
   if (!cfg || !draft) return null;
   const dirty = JSON.stringify(cfg) !== JSON.stringify(draft);
   const set = <K extends keyof AiConfig>(k: K, v: AiConfig[K]) => setDraft({ ...draft, [k]: v });
+  const listed = models.list.includes(draft.model);
+  const options = listed || !draft.model ? models.list : [draft.model, ...models.list];
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -80,13 +119,14 @@ export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSa
       <div>
         <h3 className="font-medium">Model server</h3>
         <p className="text-sm text-muted-foreground">
-          Must be on this machine. Ollama on an Apple Silicon Mac is the easy path; LM Studio and
-          llama.cpp work through the OpenAI-compatible option.
+          Any machine on your own network: this one, a Mac mini over the LAN, or a Tailscale
+          address. Public internet hosts are refused. Ollama is the easy path; mlx_lm.server, LM
+          Studio and llama.cpp work through the OpenAI-compatible option.
         </p>
       </div>
       <Field
         label="Provider"
-        help="Ollama uses its native API. OpenAI-compatible covers LM Studio, llama.cpp server, vLLM."
+        help="Ollama uses its native API. OpenAI-compatible covers mlx_lm.server, LM Studio, llama.cpp server, vLLM."
       >
         <Select
           value={draft.provider}
@@ -111,30 +151,78 @@ export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSa
           placeholder="http://127.0.0.1:11434"
           spellCheck={false}
         />
+        <p
+          className={cn(
+            "mt-1 text-xs",
+            models.reachable ? "text-muted-foreground" : "text-destructive",
+          )}
+        >
+          {models.loading
+            ? "Checking server…"
+            : models.reachable
+              ? `Server answered with ${models.list.length} model${models.list.length === 1 ? "" : "s"}.`
+              : `No answer from this server${models.error ? `: ${models.error}` : ""}.`}
+        </p>
       </Field>
       <Field
         label="Model"
         help={
-          installed.length
-            ? `Installed: ${installed.join(", ")}`
-            : "The name as the server knows it, for example qwen3:4b."
+          models.reachable && models.list.length === 0
+            ? "This server does not list its models; type the name it expects."
+            : "What the server reports as installed. Pull or download a model on the server to see it here."
         }
       >
-        <Input
-          value={draft.model}
-          onChange={(e) => set("model", e.target.value)}
-          list="ai-models"
-          spellCheck={false}
-        />
-        <datalist id="ai-models">
-          {installed.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+        {typing || (models.reachable && models.list.length === 0) ? (
+          <div className="flex gap-2">
+            <Input
+              value={draft.model}
+              onChange={(e) => set("model", e.target.value)}
+              placeholder="model name"
+              spellCheck={false}
+              autoFocus
+            />
+            {models.list.length > 0 && (
+              <Button type="button" variant="ghost" onClick={() => setTyping(false)}>
+                Pick from list
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Select
+              value={draft.model && options.includes(draft.model) ? draft.model : ""}
+              onValueChange={(v) => (v === OTHER ? setTyping(true) : set("model", v))}
+              disabled={models.loading && models.list.length === 0}
+            >
+              <SelectTrigger className="min-w-72">
+                <SelectValue placeholder={models.reachable ? "Choose a model" : "Server offline"} />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                    {!models.list.includes(m) ? " (not installed)" : ""}
+                  </SelectItem>
+                ))}
+                <SelectItem value={OTHER}>Other, type a name</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Refresh model list"
+              onClick={() => setDraft({ ...draft })}
+              disabled={models.loading}
+            >
+              <RefreshCw className={cn("size-4", models.loading && "animate-spin")} />
+            </Button>
+          </div>
+        )}
       </Field>
       <Field
         label="Confidence floor"
-        help="Model answers below this are ignored. 0.6 is a sensible default for a 4B model."
+        help="Model answers below this are ignored. 0.6 is a sensible default for a 4B model; 0.7 for a 14B."
       >
         <Input
           type="number"
@@ -160,7 +248,7 @@ export function AiConfigForm({ installed, onSaved }: { installed: string[]; onSa
         />
       </Field>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={busy || !dirty}>
+        <Button type="submit" disabled={busy || !dirty || !draft.model}>
           Save
         </Button>
         <Button

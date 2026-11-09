@@ -1,6 +1,7 @@
 import type { Db, MerchantProfile } from "../db/index.ts";
 import {
   assertLocal,
+  listModels,
   LocalClassifier,
   type Classifier,
   type ClassifierConfig,
@@ -128,6 +129,15 @@ export class AiService {
     this.instance = instance;
     this.db.setSetting(KEY, JSON.stringify(next));
     return this.config;
+  }
+
+  /** List models on any server, saved or not, so the UI can offer a dropdown before saving. */
+  async models(provider?: unknown, url?: unknown) {
+    const p =
+      provider === "openai" ? "openai" : provider === "ollama" ? "ollama" : this.current.provider;
+    const u = typeof url === "string" && url.trim() ? url.trim() : this.current.url;
+    assertLocal(u, this.guard); // throws with the user-facing message for public hosts
+    return { provider: p, url: u.replace(/\/$/, ""), ...(await listModels(p, u)) };
   }
 
   /** Check reachability and model presence, then time one real classification. */

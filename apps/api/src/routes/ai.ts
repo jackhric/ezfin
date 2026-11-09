@@ -53,6 +53,17 @@ export function registerAiRoutes(app: Api, { db, ai, minConfidence, resolver }: 
 
   app.use("/api/ai/config", requireAdmin());
   app.use("/api/ai/test", requireAdmin());
+  app.use("/api/ai/models", requireAdmin());
+
+  /** Models available on a server, without saving. ?provider=&url= default to the saved values. */
+  app.get("/api/ai/models", async (c) => {
+    if (!ai?.service) return c.json({ error: "AI settings are fixed in this process" }, 400);
+    try {
+      return c.json(await ai.service.models(c.req.query("provider"), c.req.query("url")));
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : "invalid url" }, 400);
+    }
+  });
 
   app.get("/api/ai/config", (c) => {
     if (!ai?.service) return c.json({ error: "AI settings are fixed in this process" }, 400);

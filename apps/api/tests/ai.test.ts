@@ -427,6 +427,49 @@ describe("ai configuration and connection test", () => {
     }
   });
 
+  it("lists models for any private server without saving, and refuses public ones", async () => {
+    try {
+      const { app, headers, service } = await appWithService(async (url) => {
+        const u = String(url);
+        if (u === "http://10.0.10.66:8080/v1/models")
+          return new Response(
+            JSON.stringify({
+              data: [
+                { id: "mlx-community/gemma-4-e4b-it-4bit" },
+                { id: "mlx-community/Qwen3-14B-4bit" },
+              ],
+            }),
+          );
+        if (u === "http://127.0.0.1:11434/api/tags")
+          return new Response(JSON.stringify({ models: [{ name: "qwen3:4b" }] }));
+        throw new Error("ECONNREFUSED");
+      });
+      const mac = await ((
+        await app.request("/api/ai/models?provider=openai&url=http://10.0.10.66:8080", { headers })
+      ).json() as Promise<Json>);
+      expect(mac).toMatchObject({
+        reachable: true,
+        models: ["mlx-community/Qwen3-14B-4bit", "mlx-community/gemma-4-e4b-it-4bit"],
+      });
+      // Nothing was saved by listing.
+      expect(service.config.url).toBe("http://127.0.0.1:11434");
+      const saved = await ((
+        await app.request("/api/ai/models", { headers })
+      ).json() as Promise<Json>);
+      expect(saved).toMatchObject({ provider: "ollama", models: ["qwen3:4b"] });
+      const down = await ((
+        await app.request("/api/ai/models?provider=ollama&url=http://10.0.0.9:11434", { headers })
+      ).json() as Promise<Json>);
+      expect(down).toMatchObject({ reachable: false, models: [] });
+      const pub = await app.request("/api/ai/models?provider=openai&url=https://api.openai.com", {
+        headers,
+      });
+      expect(pub.status).toBe(400);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("test endpoint reports offline, model missing, and a timed sample classification", async () => {
     let mode: "offline" | "missing" | "ok" = "offline";
     try {
