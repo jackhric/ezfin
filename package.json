@@ -7,7 +7,7 @@
     "dev": "vp run -r --parallel dev",
     "dev:web": "vp run web#dev",
     "dev:api": "vp run api#dev",
-    "seed": "vp run api#seed",
+    "reset": "vp run api#reset",
     "start": "vp run web#build && vp run api#start",
     "ready": "vp check && vp run -r test && vp run -r build"
   },

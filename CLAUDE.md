@@ -40,5 +40,5 @@ release. Add a tool name to select part of the graph. For example, run
 - The AI step (`apps/api/src/ai`) may only talk to a loopback model server. Never add a hosted LLM provider. Prompts send merchant keys and descriptions only.
 - `packages/core` must stay dependency-free and pure. New categorization rules go in `categorize.ts` with a test in `packages/core/tests`.
 - UI components come from shadcn (`pnpm dlx shadcn@latest add <name>` inside `apps/web`). Prefer them over hand-rolled widgets.
-- Run `vp check` and `vp run -r test` before committing. `vp run seed` rebuilds the demo database.
+- Run `vp check` and `vp run -r test` before committing. `vp run reset` wipes the local database and credentials.
 - `vp run start` builds the UI and serves it from the API process. The Dockerfile does the same; keep its COPY list in sync with the workspace layout.

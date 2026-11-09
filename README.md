@@ -43,7 +43,7 @@ Other tasks:
 vp check           # format, lint, type-check everything
 vp run -r test     # unit tests for core and api
 vp run -r build    # production build
-vp run seed        # regenerate the demo database
+vp run reset       # wipe the local database and credentials
 ```
 
 ## Running in a container

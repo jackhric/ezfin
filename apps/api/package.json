@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vpx --watch src/server.ts",
     "start": "vpx src/server.ts",
-    "seed": "vpx src/seed.ts",
+    "reset": "vpx src/reset.ts",
     "test": "vp test",
     "build": "tsc --noEmit"
   },
